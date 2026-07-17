@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>姿勢分析ツール プロトタイプ</title>
+<style>
+  :root{
+    --bg:#F3F6F8;
+    --panel:#FFFFFF;
+    --ink:#17263B;
+    --sub:#5B7086;
+    --accent:#3E5C76;
+    --accent-2:#A9C5D9;
+    --warn:#E4572E;
+    --good:#3F9668;
+    --line:#DCE3E8;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Hiragino Kaku Gothic ProN","Hiragino Sans","Yu Gothic",sans-serif;
+    padding:28px 20px 60px;
+  }
+  .wrap{max-width:1080px;margin:0 auto;}
+  header{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:22px;flex-wrap:wrap;gap:8px;}
+  header h1{font-size:22px;letter-spacing:.04em;margin:0;font-weight:700;}
+  header .tag{color:var(--sub);font-size:12px;letter-spacing:.08em;}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin-bottom:18px;}
+  .panel h2{font-size:14px;letter-spacing:.06em;color:var(--accent);margin:0 0 14px;font-weight:700;text-transform:uppercase;}
+  .row{display:flex;gap:14px;flex-wrap:wrap;}
+  .row .field{flex:1;min-width:140px;}
+  label{display:block;font-size:12px;color:var(--sub);margin-bottom:4px;}
+  input[type=text],input[type=date],input[type=number]{
+    width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:6px;font-size:14px;color:var(--ink);
+  }
+  .btn{
+    background:var(--accent);color:#fff;border:none;border-radius:6px;padding:9px 16px;font-size:13px;font-weight:700;
+    cursor:pointer;letter-spacing:.03em;
+  }
+  .btn.secondary{background:#fff;color:var(--accent);border:1px solid var(--accent);}
+  .btn:disabled{opacity:.45;cursor:not-allowed;}
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:18px;}
+  @media (max-width:760px){.cols{grid-template-columns:1fr;}}
+  .capture{border:1.5px dashed var(--line);border-radius:8px;padding:14px;text-align:center;background:#FAFBFC;}
+  .capture h3{margin:0 0 10px;font-size:13px;color:var(--sub);letter-spacing:.05em;}
+  canvas{max-width:100%;border-radius:6px;background:#EDEFF1;}
+  .metrics{margin-top:12px;font-size:13px;text-align:left;}
+  .metric-row{display:flex;justify-content:space-between;align-items:center;padding:7px 4px;border-bottom:1px solid var(--line);}
+  .metric-row:last-child{border-bottom:none;}
+  .metric-name{color:var(--sub);}
+  .badge{
+    display:inline-flex;align-items:center;justify-content:center;min-width:58px;padding:3px 9px;border-radius:999px;
+    font-weight:700;font-size:13px;color:#fff;
+  }
+  .badge.good{background:var(--good);}
+  .badge.warn{background:var(--warn);}
+  .thresholds{display:flex;gap:10px;flex-wrap:wrap;margin-top:6px;}
+  .thresholds .field{max-width:150px;}
+  footer{color:var(--sub);font-size:11.5px;line-height:1.7;margin-top:10px;}
+  .status{font-size:12px;color:var(--sub);margin-top:8px;}
+  .history table{width:100%;border-collapse:collapse;font-size:12.5px;}
+  .history th,.history td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;}
+  .history th{color:var(--sub);font-weight:700;}
+  @media print{
+    .no-print{display:none !important;}
+    body{padding:0;background:#fff;}
+    .panel{border:none;padding:0;margin-bottom:14px;}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>POSTURE CHECK &nbsp;姿勢分析ツール</h1>
+    <div class="tag">PROTOTYPE — ランドマーク姿勢評価</div>
+  </header>
+
+  <div class="panel no-print">
+    <h2>患者情報</h2>
+    <div class="row">
+      <div class="field"><label>氏名 / ID</label><input type="text" id="pName" placeholder="例: 山田 太郎"></div>
+      <div class="field"><label>計測日</label><input type="date" id="pDate"></div>
+      <div class="field" style="flex:0 0 auto;align-self:flex-end;">
+        <button class="btn secondary" id="saveBtn" disabled>この結果を記録する</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel no-print">
+    <h2>判定しきい値(先生の基準に合わせて調整可能)</h2>
+    <div class="thresholds">
+      <div class="field"><label>注意ライン(度)</label><input type="number" id="thWarn" value="3" step="0.5"></div>
+      <div class="field"><label>要確認ライン(度)</label><input type="number" id="thAlert" value="6" step="0.5"></div>
+    </div>
+  </div>
+
+  <div class="cols">
+    <div class="panel">
+      <h2>正面立位</h2>
+      <div class="capture no-print">
+        <h3>正面写真をアップロード</h3>
+        <input type="file" id="frontFile" accept="image/*">
+      </div>
+      <div style="text-align:center;margin-top:12px;"><canvas id="frontCanvas"></canvas></div>
+      <div class="metrics" id="frontMetrics"></div>
+    </div>
+
+    <div class="panel">
+      <h2>側面立位</h2>
+      <div class="capture no-print">
+        <h3>側面写真をアップロード</h3>
+        <input type="file" id="sideFile" accept="image/*">
+      </div>
+      <div style="text-align:center;margin-top:12px;"><canvas id="sideCanvas"></canvas></div>
+      <div class="metrics" id="sideMetrics"></div>
+    </div>
+  </div>
+
+  <div class="panel no-print">
+    <div class="status" id="modelStatus">姿勢推定モデルを読み込み中…</div>
+  </div>
+
+  <div class="panel history no-print">
+    <h2>記録履歴(この端末内に保存)</h2>
+    <div id="historyBox">まだ記録がありません。</div>
+  </div>
+
+  <button class="btn no-print" id="printBtn" style="margin-bottom:20px;">レポートを印刷 / PDF保存</button>
+
+  <footer>
+    ※ 本ツールはAIによる骨格ランドマーク検出をもとにした角度の目安を表示するプロトタイプです。診断を行うものではなく、あくまで患者説明・経過観察の補助を目的としています。しきい値は院内の評価基準に合わせて調整してください。<br>
+    ※ 撮影は無地の背景・全身が入るよう距離をとり、裸足・自然な立位で正面/真横から撮影してください。
+  </footer>
+
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tensorflow/4.22.0/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection"></script>
+<script>
+const KP = {nose:0,leftEye:1,rightEye:2,leftEar:3,rightEar:4,leftShoulder:5,rightShoulder:6,
+  leftElbow:7,rightElbow:8,leftWrist:9,rightWrist:10,leftHip:11,rightHip:12,
+  leftKnee:13,rightKnee:14,leftAnkle:15,rightAnkle:16};
+
+const EDGES = [
+  [KP.leftShoulder,KP.rightShoulder],[KP.leftHip,KP.rightHip],
+  [KP.leftShoulder,KP.leftHip],[KP.rightShoulder,KP.rightHip],
+  [KP.leftShoulder,KP.leftElbow],[KP.leftElbow,KP.leftWrist],
+  [KP.rightShoulder,KP.rightElbow],[KP.rightElbow,KP.rightWrist],
+  [KP.leftHip,KP.leftKnee],[KP.leftKnee,KP.leftAnkle],
+  [KP.rightHip,KP.rightKnee],[KP.rightKnee,KP.rightAnkle],
+  [KP.leftEar,KP.leftShoulder],[KP.rightEar,KP.rightShoulder]
+];
+
+let detector = null;
+
+async function loadModel(){
+  detector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet,
+    {modelType: poseDetection.movenet.modelType.SINGLEPOSE_THUNDER});
+  document.getElementById('modelStatus').textContent = 'モデル読み込み完了。写真をアップロードしてください。';
+  document.getElementById('saveBtn').disabled = false;
+}
+loadModel().catch(e=>{
+  document.getElementById('modelStatus').textContent = 'モデルの読み込みに失敗しました。ネットワーク接続をご確認のうえ、このHTMLファイルをダウンロードして通常のブラウザで開いてください。('+e.message+')';
+});
+
+function angleFromHorizontal(p1,p2){
+  const dx=p2.x-p1.x, dy=p2.y-p1.y;
+  return Math.atan2(dy,dx)*180/Math.PI;
+}
+function angleFromVertical(p1,p2){
+  const dx=p2.x-p1.x, dy=p2.y-p1.y;
+  return Math.atan2(dx,dy)*180/Math.PI;
+}
+function thresholds(){
+  return {warn: parseFloat(document.getElementById('thWarn').value)||3,
+          alert: parseFloat(document.getElementById('thAlert').value)||6};
+}
+function badge(valueDeg){
+  const t = thresholds();
+  const a = Math.abs(valueDeg);
+  const level = a>=t.alert?'warn':(a>=t.warn?'warn':'good');
+  const cls = a>=t.warn?'warn':'good';
+  return `<span class="badge ${cls}">${valueDeg.toFixed(1)}°</span>`;
+}
+function metricRow(name, valueDeg, note){
+  return `<div class="metric-row"><div class="metric-name">${name}${note?('<br><span style="font-size:11px;color:#93A3B3;">'+note+'</span>'):''}</div>${badge(valueDeg)}</div>`;
+}
+
+function setupCanvas(canvas,img,maxW){
+  const scale = Math.min(maxW/img.naturalWidth,1);
+  canvas.width = img.naturalWidth*scale;
+  canvas.height = img.naturalHeight*scale;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(img,0,0,canvas.width,canvas.height);
+  return {ctx,scale};
+}
+
+function drawSkeleton(ctx,kps,scale){
+  ctx.lineWidth=2;
+  ctx.strokeStyle='#3E5C76';
+  EDGES.forEach(([a,b])=>{
+    const p1=kps[a], p2=kps[b];
+    if(p1.score>0.3 && p2.score>0.3){
+      ctx.beginPath();
+      ctx.moveTo(p1.x*scale,p1.y*scale);
+      ctx.lineTo(p2.x*scale,p2.y*scale);
+      ctx.stroke();
+    }
+  });
+  kps.forEach(p=>{
+    if(p.score>0.3){
+      ctx.beginPath();
+      ctx.arc(p.x*scale,p.y*scale,3.5,0,2*Math.PI);
+      ctx.fillStyle='#E4572E';
+      ctx.fill();
+    }
+  });
+}
+
+function drawVerticalGuide(ctx,x,height){
+  ctx.save();
+  ctx.setLineDash([5,5]);
+  ctx.strokeStyle='#A9C5D9';
+  ctx.lineWidth=1.5;
+  ctx.beginPath();
+  ctx.moveTo(x,0);
+  ctx.lineTo(x,height);
+  ctx.stroke();
+  ctx.restore();
+}
+
+async function analyzeFront(file){
+  const img = new Image();
+  img.src = URL.createObjectURL(file);
+  await img.decode();
+  const poses = await detector.estimatePoses(img);
+  const canvas = document.getElementById('frontCanvas');
+  const {ctx,scale} = setupCanvas(canvas,img,440);
+  const box = document.getElementById('frontMetrics');
+  if(!poses.length){ box.innerHTML='人物を検出できませんでした。'; return; }
+  const kps = poses[0].keypoints;
+  drawSkeleton(ctx,kps,scale);
+
+  const ankleMidX = (kps[KP.leftAnkle].x+kps[KP.rightAnkle].x)/2;
+  drawVerticalGuide(ctx, ankleMidX*scale, canvas.height);
+
+  const shoulderTilt = angleFromHorizontal(kps[KP.leftShoulder],kps[KP.rightShoulder]);
+  const hipTilt = angleFromHorizontal(kps[KP.leftHip],kps[KP.rightHip]);
+  const eyeTilt = angleFromHorizontal(kps[KP.leftEye],kps[KP.rightEye]);
+  const shoulderWidth = Math.abs(kps[KP.leftShoulder].x-kps[KP.rightShoulder].x)||1;
+  const headOffsetPct = ((kps[KP.nose].x-ankleMidX)/shoulderWidth)*100;
+
+  box.innerHTML =
+    metricRow('肩の高低差', shoulderTilt,'左右の肩を結ぶ線の水平からの傾き') +
+    metricRow('骨盤の傾き', hipTilt,'左右の腸骨稜を結ぶ線の傾き') +
+    metricRow('頭部側方傾斜', eyeTilt,'両目を結ぶ線の傾き') +
+    metricRow('重心線からの頭部オフセット', headOffsetPct,'足関節中点を通る垂線からの鼻のズレ(肩幅比%)');
+
+  return {shoulderTilt,hipTilt,eyeTilt,headOffsetPct};
+}
+
+async function analyzeSide(file){
+  const img = new Image();
+  img.src = URL.createObjectURL(file);
+  await img.decode();
+  const poses = await detector.estimatePoses(img);
+  const canvas = document.getElementById('sideCanvas');
+  const {ctx,scale} = setupCanvas(canvas,img,440);
+  const box = document.getElementById('sideMetrics');
+  if(!poses.length){ box.innerHTML='人物を検出できませんでした。'; return; }
+  const kps = poses[0].keypoints;
+  drawSkeleton(ctx,kps,scale);
+
+  const useLeft = kps[KP.leftShoulder].score > kps[KP.rightShoulder].score;
+  const ear = useLeft?kps[KP.leftEar]:kps[KP.rightEar];
+  const shoulder = useLeft?kps[KP.leftShoulder]:kps[KP.rightShoulder];
+  const hip = useLeft?kps[KP.leftHip]:kps[KP.rightHip];
+  const ankle = useLeft?kps[KP.leftAnkle]:kps[KP.rightAnkle];
+
+  drawVerticalGuide(ctx, ankle.x*scale, canvas.height);
+
+  const forwardHead = angleFromHorizontal(shoulder,ear);
+  const trunkLean = angleFromVertical(hip,shoulder);
+  const pelvisLean = angleFromVertical(ankle,hip);
+
+  box.innerHTML =
+    metricRow('頭部前方偏位角', forwardHead,'肩峰と耳孔を結ぶ線の水平からの角度(小さいほど前方偏位大)') +
+    metricRow('体幹の前後傾', trunkLean,'股関節-肩峰ラインの垂線からの傾き') +
+    metricRow('骨盤の前後傾(下肢アライメント)', pelvisLean,'足関節-股関節ラインの垂線からの傾き');
+
+  return {forwardHead,trunkLean,pelvisLean};
+}
+
+let lastFront=null, lastSide=null;
+
+document.getElementById('frontFile').addEventListener('change', async e=>{
+  if(!detector||!e.target.files[0]) return;
+  lastFront = await analyzeFront(e.target.files[0]);
+});
+document.getElementById('sideFile').addEventListener('change', async e=>{
+  if(!detector||!e.target.files[0]) return;
+  lastSide = await analyzeSide(e.target.files[0]);
+});
+
+async function refreshHistory(){
+  const box = document.getElementById('historyBox');
+  try{
+    const res = await window.storage.list('posture:');
+    if(!res || !res.keys.length){ box.innerHTML='まだ記録がありません。'; return; }
+    const rows = [];
+    for(const k of res.keys){
+      try{
+        const r = await window.storage.get(k);
+        const d = JSON.parse(r.value);
+        rows.push(d);
+      }catch(e){}
+    }
+    rows.sort((a,b)=> (a.date>b.date?-1:1));
+    let html = '<table><tr><th>氏名/ID</th><th>計測日</th><th>肩の高低差</th><th>骨盤傾き</th><th>頭部前方偏位角</th></tr>';
+    rows.forEach(r=>{
+      html += `<tr><td>${r.name||''}</td><td>${r.date||''}</td>`+
+        `<td>${r.front?r.front.shoulderTilt.toFixed(1)+'°':'-'}</td>`+
+        `<td>${r.front?r.front.hipTilt.toFixed(1)+'°':'-'}</td>`+
+        `<td>${r.side?r.side.forwardHead.toFixed(1)+'°':'-'}</td></tr>`;
+    });
+    html += '</table>';
+    box.innerHTML = html;
+  }catch(e){ box.innerHTML='履歴の取得に失敗しました。'; }
+}
+refreshHistory();
+
+document.getElementById('saveBtn').addEventListener('click', async ()=>{
+  const name = document.getElementById('pName').value.trim();
+  const date = document.getElementById('pDate').value || new Date().toISOString().slice(0,10);
+  if(!name){ alert('氏名/IDを入力してください。'); return; }
+  const record = {name,date,front:lastFront,side:lastSide};
+  const key = 'posture:'+name+':'+date+':'+Date.now();
+  try{
+    await window.storage.set(key, JSON.stringify(record), false);
+    refreshHistory();
+    alert('記録を保存しました。');
+  }catch(e){ alert('保存に失敗しました。'); }
+});
+
+document.getElementById('printBtn').addEventListener('click', ()=> window.print());
+</script>
+</body>
+</html>

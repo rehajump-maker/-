@@ -68,7 +68,7 @@
   .tab-btn{
     background:transparent; border:none; color:#CBDAD5;
     padding:8px 12px; border-radius:7px; font-size:0.88rem; font-weight:600;
-    transition:.15s;
+    transition:.15s; text-decoration:none; display:inline-flex; align-items:center; cursor:pointer;
   }
   .tab-btn:hover{background:rgba(255,255,255,0.08); color:#fff;}
   .tab-btn.active{background:var(--surface); color:var(--pine-deep);}
@@ -268,6 +268,9 @@ const API_TOKEN = "a2ef0716-590b-400a-aa71-42209c5e38cb";
 
 const SERVICE_OPTIONS = ["整体30分","整体50分","パーソナルトレーニング30分","パーソナルトレーニング50分","ジム入会時説明"];
 
+const POSTURE_URL = "https://rehajump-maker.github.io/-/posture_analysis_tool_v13.html";
+const MEASURE_URL = "https://script.google.com/macros/s/AKfycbxmbLCAHgtqFzNrOiFSPvZ0uLn0hhwb5VD14xrSaRG0xhU62k7nImCGIhtXXqvjE_ze/exec";
+
 function uid(prefix){ return prefix + "_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2,8); }
 
 function todayISO(){
@@ -432,6 +435,10 @@ function renderTopbar(){
       <button class="tab-btn ${state.tab==='templates'?'active':''}" data-tab="templates">見本テキスト管理</button>
       <button class="tab-btn ${state.tab==='stores'?'active':''}" data-tab="stores">店舗管理</button>
     </div>
+    <div class="tabs">
+      <a class="tab-btn" href="${POSTURE_URL}" target="_blank" rel="noopener">姿勢分析を開く</a>
+      <a class="tab-btn" href="${MEASURE_URL}" target="_blank" rel="noopener">体力測定を開く</a>
+    </div>
   </div>`;
 }
 
@@ -577,6 +584,10 @@ function renderPatientModal(){
         <div>
           <div style="font-size:1.05rem; font-weight:800;">${escapeHtml(p.name)||"（名前未登録）"}</div>
           <div style="font-size:0.78rem; color:#BFD3CC;">会員番号: ${escapeHtml(p.memberId)}　共通ID（体力測定・姿勢分析ツールと連動予定）</div>
+          <div style="margin-top:6px; display:flex; gap:6px;">
+            <a class="btn sm ghost" style="color:#fff; border:1px solid rgba(255,255,255,0.3);" href="${POSTURE_URL}?member=${encodeURIComponent(p.memberId)}" target="_blank" rel="noopener">この患者の姿勢分析を開く</a>
+            <a class="btn sm ghost" style="color:#fff; border:1px solid rgba(255,255,255,0.3);" href="${MEASURE_URL}?member=${encodeURIComponent(p.memberId)}" target="_blank" rel="noopener">この患者の体力測定を開く</a>
+          </div>
         </div>
         <button class="x" id="closePatient">\u2715</button>
       </div>
@@ -1042,6 +1053,11 @@ async function deleteStore(id){
   render();
   await loadAll();
   render();
+  const params = new URLSearchParams(window.location.search);
+  const incomingMember = params.get("member");
+  if(incomingMember && state.patients.some(p => p.memberId === incomingMember)){
+    openPatient(incomingMember);
+  }
 })();
 </script>
 </body>

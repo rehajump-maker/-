@@ -1,0 +1,1048 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no">
+<title>Jump 電子カルテシステム</title>
+<style>
+  :root{
+    --bg: #F3F5F1;
+    --surface: #FFFFFF;
+    --surface-2: #ECF0EA;
+    --ink: #1E2924;
+    --ink-soft: #57645E;
+    --line: #DBE1D8;
+    --pine: #1F4B45;
+    --pine-deep: #163531;
+    --pine-soft: #E4EEEC;
+    --amber: #D99A3B;
+    --amber-deep: #B87C22;
+    --coral: #C0553F;
+    --coral-soft: #F5E4DF;
+    --radius: 10px;
+    --shadow: 0 1px 2px rgba(20,30,25,0.06), 0 6px 20px rgba(20,30,25,0.06);
+    font-size: 16px;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;height:100%;}
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font-family: "Hiragino Sans","Hiragino Kaku Gothic ProN","Yu Gothic","Noto Sans JP",system-ui,-apple-system,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  ::selection{background:var(--amber); color:#fff;}
+  button{font-family:inherit; cursor:pointer;}
+  input, textarea, select{font-family:inherit; font-size:0.95rem;}
+
+  /* ---------- App shell ---------- */
+  #app{display:flex; flex-direction:column; min-height:100vh;}
+
+  .topbar{
+    background:var(--pine-deep);
+    color:#fff;
+    padding:10px 18px;
+    display:flex;
+    align-items:center;
+    gap:16px;
+    flex-wrap:wrap;
+    position:sticky; top:0; z-index:40;
+    box-shadow:0 2px 10px rgba(0,0,0,0.15);
+  }
+  .brand{display:flex; align-items:baseline; gap:8px; margin-right:auto;}
+  .brand .mark{
+    font-weight:800; letter-spacing:0.02em; font-size:1.05rem;
+    background:var(--amber); color:var(--pine-deep);
+    padding:3px 9px; border-radius:6px;
+  }
+  .brand .title{font-weight:700; font-size:1.02rem;}
+  .brand .sub{font-size:0.72rem; color:#BFD3CC; font-weight:400;}
+
+  .store-picker select{
+    background:rgba(255,255,255,0.1); color:#fff; border:1px solid rgba(255,255,255,0.25);
+    border-radius:7px; padding:7px 10px;
+  }
+  .store-picker select option{color:#111;}
+
+  .tabs{display:flex; gap:4px;}
+  .tab-btn{
+    background:transparent; border:none; color:#CBDAD5;
+    padding:8px 12px; border-radius:7px; font-size:0.88rem; font-weight:600;
+    transition:.15s;
+  }
+  .tab-btn:hover{background:rgba(255,255,255,0.08); color:#fff;}
+  .tab-btn.active{background:var(--surface); color:var(--pine-deep);}
+
+  .notice-btn{
+    position:relative;
+    background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.25); color:#fff;
+    padding:8px 12px; border-radius:7px; font-size:0.85rem; font-weight:600;
+    display:flex; align-items:center; gap:6px;
+  }
+  .notice-btn .dot{
+    width:8px; height:8px; border-radius:50%; background:var(--coral); display:none;
+  }
+  .notice-btn.has-content .dot{display:inline-block;}
+
+  main{flex:1; padding:18px; max-width:1180px; margin:0 auto; width:100%;}
+
+  /* ---------- generic ---------- */
+  .card{
+    background:var(--surface); border:1px solid var(--line); border-radius:var(--radius);
+    box-shadow:var(--shadow);
+  }
+  .btn{
+    border:1px solid var(--line); background:var(--surface); color:var(--ink);
+    padding:9px 14px; border-radius:8px; font-size:0.88rem; font-weight:600;
+  }
+  .btn:hover{background:var(--surface-2);}
+  .btn.primary{background:var(--pine); border-color:var(--pine); color:#fff;}
+  .btn.primary:hover{background:var(--pine-deep);}
+  .btn.amber{background:var(--amber); border-color:var(--amber); color:#fff;}
+  .btn.amber:hover{background:var(--amber-deep);}
+  .btn.danger{background:var(--surface); border-color:var(--coral); color:var(--coral);}
+  .btn.danger:hover{background:var(--coral-soft);}
+  .btn.ghost{background:transparent; border-color:transparent;}
+  .btn.sm{padding:5px 10px; font-size:0.78rem;}
+  .btn:disabled{opacity:0.45; cursor:not-allowed;}
+
+  input[type=text], input[type=date], input[type=number], textarea, select.field{
+    width:100%; border:1px solid var(--line); border-radius:8px; padding:9px 11px;
+    background:#fff; color:var(--ink);
+  }
+  input:focus, textarea:focus, select:focus, button:focus-visible{
+    outline:2px solid var(--amber); outline-offset:1px;
+  }
+  label.field-label{display:block; font-size:0.76rem; font-weight:700; color:var(--ink-soft); margin-bottom:4px; letter-spacing:0.02em;}
+
+  .row{display:flex; gap:12px; flex-wrap:wrap;}
+  .row > *{flex:1; min-width:140px;}
+
+  .section-title{
+    font-size:1.02rem; font-weight:800; color:var(--pine-deep); margin:0 0 12px 0;
+    display:flex; align-items:center; gap:8px;
+  }
+  .section-title .bar{width:5px; height:18px; background:var(--amber); border-radius:3px; display:inline-block;}
+
+  .empty{
+    text-align:center; color:var(--ink-soft); padding:40px 20px; font-size:0.9rem;
+  }
+
+  /* ---------- patient list ---------- */
+  .list-toolbar{display:flex; gap:10px; margin-bottom:14px; flex-wrap:wrap; align-items:center;}
+  .list-toolbar input[type=text]{max-width:280px;}
+  .count-pill{font-size:0.78rem; color:var(--ink-soft); background:var(--surface-2); padding:6px 10px; border-radius:20px;}
+
+  table.plist{width:100%; border-collapse:collapse; font-size:0.88rem;}
+  table.plist th{
+    text-align:left; font-size:0.72rem; color:var(--ink-soft); font-weight:700;
+    text-transform:uppercase; letter-spacing:0.04em; padding:8px 10px; border-bottom:2px solid var(--line);
+  }
+  table.plist td{padding:10px; border-bottom:1px solid var(--line); vertical-align:middle;}
+  table.plist tr.prow{cursor:pointer; transition:.1s;}
+  table.plist tr.prow:hover{background:var(--pine-soft);}
+  .pid-badge{
+    font-family:ui-monospace,Menlo,monospace; font-size:0.78rem; background:var(--surface-2);
+    padding:2px 7px; border-radius:5px; color:var(--ink-soft);
+  }
+  .age-badge{font-weight:700; color:var(--pine);}
+  .store-tag{font-size:0.72rem; background:var(--pine-soft); color:var(--pine-deep); padding:2px 8px; border-radius:20px; font-weight:600;}
+
+  /* ---------- modal / overlay ---------- */
+  .overlay{
+    position:fixed; inset:0; background:rgba(15,25,20,0.45); z-index:100;
+    display:flex; align-items:flex-start; justify-content:center; padding:24px 12px;
+    overflow-y:auto;
+  }
+  .modal{
+    background:var(--bg); border-radius:14px; width:100%; max-width:880px;
+    box-shadow:0 20px 60px rgba(0,0,0,0.3); overflow:hidden; margin-bottom:24px;
+  }
+  .modal-head{
+    background:var(--pine-deep); color:#fff; padding:16px 20px; display:flex; align-items:center; gap:14px;
+  }
+  .modal-head .x{margin-left:auto; background:rgba(255,255,255,0.12); border:none; color:#fff; width:32px; height:32px; border-radius:8px; font-size:1rem;}
+  .modal-body{padding:18px 20px 24px;}
+
+  .panel-slide{
+    position:fixed; top:0; right:0; height:100%; width:100%; max-width:420px;
+    background:var(--bg); z-index:110; box-shadow:-8px 0 30px rgba(0,0,0,0.25);
+    display:flex; flex-direction:column;
+  }
+  .panel-head{background:var(--pine-deep); color:#fff; padding:16px 20px; display:flex; align-items:center;}
+  .panel-head .x{margin-left:auto; background:rgba(255,255,255,0.12); border:none; color:#fff; width:32px; height:32px; border-radius:8px;}
+  .panel-body{padding:18px 20px; overflow-y:auto; flex:1;}
+
+  /* patient detail header */
+  .pd-header{
+    display:flex; gap:18px; align-items:flex-start; flex-wrap:wrap; margin-bottom:16px;
+  }
+  .pd-avatar{
+    width:56px; height:56px; border-radius:12px; background:var(--amber); color:#fff;
+    display:flex; align-items:center; justify-content:center; font-weight:800; font-size:1.3rem; flex-shrink:0;
+  }
+  .pd-meta{flex:1; min-width:220px;}
+  .pd-meta .name-row{display:flex; align-items:center; gap:10px; flex-wrap:wrap;}
+  .pd-meta .name-row h2{margin:0; font-size:1.25rem;}
+  .pd-facts{display:flex; gap:16px; flex-wrap:wrap; margin-top:6px; font-size:0.84rem; color:var(--ink-soft);}
+  .pd-facts b{color:var(--ink); font-weight:700;}
+
+  .subtabs{display:flex; gap:6px; border-bottom:2px solid var(--line); margin-bottom:16px;}
+  .subtab{background:transparent; border:none; padding:9px 14px; font-weight:700; font-size:0.85rem; color:var(--ink-soft); border-bottom:2px solid transparent; margin-bottom:-2px;}
+  .subtab.active{color:var(--pine-deep); border-color:var(--amber);}
+
+  /* service chips */
+  .chip-group{display:flex; flex-wrap:wrap; gap:8px;}
+  .chip{
+    border:1.5px solid var(--line); background:#fff; border-radius:20px; padding:7px 13px; font-size:0.82rem; font-weight:600;
+    color:var(--ink-soft); user-select:none;
+  }
+  .chip.checked{background:var(--pine); border-color:var(--pine); color:#fff;}
+
+  .tmpl-row{display:flex; gap:8px; align-items:center;}
+  .tmpl-row select{flex:1;}
+
+  .img-strip{display:flex; gap:10px; flex-wrap:wrap; margin-top:10px;}
+  .img-thumb{
+    width:84px; height:84px; border-radius:8px; overflow:hidden; position:relative; border:1px solid var(--line);
+    background:#eee;
+  }
+  .img-thumb img{width:100%; height:100%; object-fit:cover; cursor:zoom-in;}
+  .img-thumb .rm{
+    position:absolute; top:2px; right:2px; background:rgba(0,0,0,0.55); color:#fff; border:none;
+    width:20px; height:20px; border-radius:5px; font-size:0.7rem; line-height:1;
+  }
+  .img-add{
+    width:84px; height:84px; border-radius:8px; border:2px dashed var(--line); background:var(--surface-2);
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px;
+    font-size:0.68rem; color:var(--ink-soft); font-weight:700; text-align:center; padding:4px;
+  }
+
+  .entry-card{background:#fff; border:1px solid var(--line); border-radius:10px; padding:14px 16px; margin-bottom:12px;}
+  .entry-card .ehead{display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:8px;}
+  .entry-date{font-weight:800; color:var(--pine-deep); font-size:0.95rem;}
+  .svc-tag{font-size:0.72rem; background:var(--pine-soft); color:var(--pine-deep); padding:3px 9px; border-radius:14px; font-weight:700;}
+  .svc-tag.free{background:var(--coral-soft); color:var(--coral);}
+  .entry-text{white-space:pre-wrap; font-size:0.88rem; line-height:1.65; color:var(--ink); margin:6px 0 0;}
+  .entry-actions{margin-left:auto; display:flex; gap:6px;}
+
+  .lightbox{position:fixed; inset:0; background:rgba(10,15,12,0.9); z-index:200; display:flex; align-items:center; justify-content:center; padding:20px;}
+  .lightbox img{max-width:100%; max-height:100%; border-radius:8px;}
+  .lightbox .x{position:absolute; top:16px; right:20px; background:rgba(255,255,255,0.15); color:#fff; border:none; width:36px; height:36px; border-radius:8px; font-size:1.1rem;}
+
+  .tmpl-list-item, .store-list-item{
+    display:flex; gap:10px; align-items:flex-start; background:#fff; border:1px solid var(--line); border-radius:10px;
+    padding:12px 14px; margin-bottom:10px;
+  }
+  .tmpl-list-item .tbody{flex:1;}
+  .tmpl-list-item .ttitle{font-weight:700; margin-bottom:3px;}
+  .tmpl-list-item .ttext{font-size:0.84rem; color:var(--ink-soft); white-space:pre-wrap;}
+
+  .notice-preview{
+    background:var(--coral-soft); border:1px solid #ecc9bd; border-radius:10px; padding:12px 14px;
+    font-size:0.85rem; white-space:pre-wrap; margin-bottom:14px; color:#7a3421;
+  }
+  .helptext{font-size:0.78rem; color:var(--ink-soft); margin-top:4px; line-height:1.5;}
+  .idlink{font-family:ui-monospace,Menlo,monospace; font-weight:700; background:var(--pine-soft); color:var(--pine-deep); padding:1px 6px; border-radius:5px;}
+
+  @media (max-width:640px){
+    main{padding:10px;}
+    .row{flex-direction:column;}
+    .row > *{min-width:0;}
+    table.plist th:nth-child(4), table.plist td:nth-child(4){display:none;}
+    .modal{max-width:100%; border-radius:0; min-height:100%;}
+    .overlay{padding:0;}
+  }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+
+<script>
+/* ============================================================
+   Jump 電子カルテシステム（Google Sheets/Drive 連携版）
+   ============================================================ */
+const API_URL = "https://script.google.com/macros/s/AKfycbwFC16qSarNPEoPsNTp0VMV7n0uZcF7HAED-2UuYBCkD3Aa2wqSzbAJOo6o53_I3ouY/exec";
+const API_TOKEN = "a2ef0716-590b-400a-aa71-42209c5e38cb";
+
+const SERVICE_OPTIONS = ["整体30分","整体50分","パーソナルトレーニング30分","パーソナルトレーニング50分","ジム入会時説明"];
+
+function uid(prefix){ return prefix + "_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2,8); }
+
+function todayISO(){
+  const d = new Date();
+  return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
+}
+
+function calcAge(birthdateISO){
+  if(!birthdateISO) return null;
+  const b = new Date(birthdateISO);
+  if(isNaN(b.getTime())) return null;
+  const t = new Date();
+  let age = t.getFullYear() - b.getFullYear();
+  const m = t.getMonth() - b.getMonth();
+  if(m < 0 || (m === 0 && t.getDate() < b.getDate())) age--;
+  return age;
+}
+
+function fmtDate(iso){
+  if(!iso) return "未登録";
+  const parts = String(iso).split("-");
+  if(parts.length < 3) return iso;
+  const [y,m,d] = parts;
+  return `${y}/${parseInt(m)}/${parseInt(d)}`;
+}
+
+function escapeHtml(s){
+  return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+
+/* ---------------- API helpers ---------------- */
+async function apiGet(params){
+  const url = API_URL + "?" + new URLSearchParams(params).toString();
+  const res = await fetch(url);
+  return await res.json();
+}
+async function apiPost(action, payload){
+  try{
+    const res = await fetch(API_URL, {
+      method: "POST",
+      headers: {"Content-Type": "text/plain;charset=utf-8"},
+      body: JSON.stringify({ action, token: API_TOKEN, payload })
+    });
+    return await res.json();
+  }catch(e){
+    console.error("API error:", action, e);
+    return { ok:false, error: String(e) };
+  }
+}
+
+/* ---------------- global state ---------------- */
+const state = {
+  patients: [],
+  templates: [],
+  stores: [],
+  currentStore: "ALL",
+  tab: "patients",
+  search: "",
+  openPatientId: null,
+  patientSubtab: "new",
+  karteCache: {},
+  draftServices: [],
+  draftFreeService: "",
+  draftText: "",
+  draftImages: [],
+  draftDate: todayISO(),
+  editingEntryId: null,
+  lightboxSrc: null,
+  loaded: false,
+  busy: false,
+  loadError: null,
+  draftPatientName: "",
+  draftPatientBirthdate: "",
+  draftPatientStore: "",
+  draftNotice: "",
+};
+
+/* ---------------- data load ---------------- */
+async function loadAll(){
+  try{
+    const data = await apiGet({ action: "bootstrap" });
+    if(!data.ok){ state.loadError = data.error || "読み込みに失敗しました"; return; }
+    state.patients = (data.patients || []).map(p => ({...p, memberId: String(p.memberId)}));
+    state.templates = data.templates || [];
+    state.stores = data.stores || [];
+    state.loaded = true;
+  }catch(e){
+    state.loadError = String(e);
+  }
+}
+
+async function getKarte(patientId){
+  if(state.karteCache[patientId]) return state.karteCache[patientId];
+  const data = await apiGet({ action: "karte", memberId: patientId });
+  const entries = (data.ok && data.entries) ? data.entries : [];
+  state.karteCache[patientId] = entries;
+  return entries;
+}
+
+/* ---------------- image handling ---------------- */
+function compressImage(file){
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const maxDim = 1280;
+        let {width, height} = img;
+        if(width > maxDim || height > maxDim){
+          if(width > height){ height = Math.round(height * maxDim/width); width = maxDim; }
+          else { width = Math.round(width * maxDim/height); height = maxDim; }
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = width; canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL("image/jpeg", 0.7));
+      };
+      img.onerror = reject;
+      img.src = e.target.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+/* ---------------- render root ---------------- */
+function render(){
+  const app = document.getElementById("app");
+  app.innerHTML = `
+    ${renderTopbar()}
+    <main>${renderMain()}</main>
+    ${state.openPatientId ? renderPatientModal() : ""}
+    ${state.lightboxSrc ? renderLightbox() : ""}
+    ${state.busy ? renderBusyOverlay() : ""}
+  `;
+  bindEvents();
+}
+
+function renderBusyOverlay(){
+  return `<div class="overlay" style="background:rgba(15,25,20,0.25); align-items:center; justify-content:center;">
+    <div class="card" style="padding:20px 28px; font-weight:700; color:var(--pine-deep);">保存中...</div>
+  </div>`;
+}
+
+function renderTopbar(){
+  const storeOptions = [`<option value="ALL">全店舗</option>`].concat(
+    state.stores.map(s => `<option value="${escapeHtml(s.storeId)}" ${state.currentStore===s.storeId?"selected":""}>${escapeHtml(s.name)}</option>`)
+  ).join("");
+  return `
+  <div class="topbar">
+    <div class="brand">
+      <span class="mark">Jump</span>
+      <span class="title">電子カルテシステム</span>
+      <span class="sub">Google Sheets連携版</span>
+    </div>
+    <div class="store-picker">
+      <select id="storeSelect">${storeOptions}</select>
+    </div>
+    <div class="tabs">
+      <button class="tab-btn ${state.tab==='patients'?'active':''}" data-tab="patients">患者一覧</button>
+      <button class="tab-btn ${state.tab==='templates'?'active':''}" data-tab="templates">見本テキスト管理</button>
+      <button class="tab-btn ${state.tab==='stores'?'active':''}" data-tab="stores">店舗管理</button>
+    </div>
+  </div>`;
+}
+
+function visiblePatients(){
+  let list = state.patients;
+  if(state.currentStore !== "ALL"){
+    const storeName = (state.stores.find(s=>s.storeId===state.currentStore)||{}).name;
+    list = list.filter(p => p.store === storeName);
+  }
+  if(state.search.trim()){
+    const q = state.search.trim().toLowerCase();
+    list = list.filter(p => (p.name||"").toLowerCase().includes(q) || String(p.memberId).includes(q));
+  }
+  return list;
+}
+
+function renderMain(){
+  if(state.loadError){
+    return `<div class="card" style="padding:24px;"><div class="empty">データの読み込みに失敗しました。<br>${escapeHtml(state.loadError)}<br><br>Apps ScriptのURL・トークン、デプロイ設定（アクセスできるユーザー：全員）をご確認ください。</div></div>`;
+  }
+  if(!state.loaded){
+    return `<div class="empty">読み込み中...</div>`;
+  }
+  if(state.tab === "patients") return renderPatientsTab();
+  if(state.tab === "templates") return renderTemplatesTab();
+  if(state.tab === "stores") return renderStoresTab();
+  return "";
+}
+
+function renderPatientListInner(shown){
+  if(shown.length === 0) return `<div class="empty">該当する患者がいません</div>`;
+  return `
+      <div style="overflow-x:auto;">
+      <table class="plist">
+        <thead><tr><th>ID</th><th>名前</th><th>年齢</th><th>生年月日</th><th>店舗</th></tr></thead>
+        <tbody>
+          ${shown.map(p => {
+            const age = calcAge(p.birthdate);
+            return `<tr class="prow" data-id="${escapeHtml(p.memberId)}">
+              <td><span class="pid-badge">${escapeHtml(p.memberId)}</span></td>
+              <td>${escapeHtml(p.name)||"（名前未登録）"}</td>
+              <td>${age!==null?`<span class="age-badge">${age}</span>歳`:"\u2014"}</td>
+              <td>${fmtDate(p.birthdate)}</td>
+              <td><span class="store-tag">${escapeHtml(p.store||"\u2014")}</span></td>
+            </tr>`;
+          }).join("")}
+        </tbody>
+      </table>
+      </div>`;
+}
+
+function countPillText(list){
+  return `${list.length}件${list.length>200?"（200件のみ表示・検索で絞り込んでください）":""}`;
+}
+
+function renderPatientsTab(){
+  const list = visiblePatients().slice().sort((a,b)=>(a.name||"").localeCompare(b.name||"","ja"));
+  const shown = list.slice(0, 200);
+  return `
+    <div class="card" style="padding:18px;">
+      <div class="section-title"><span class="bar"></span>患者一覧</div>
+      <div class="list-toolbar">
+        <input type="text" id="searchInput" placeholder="名前 または ID で検索" value="${escapeHtml(state.search)}">
+        <span class="count-pill" id="countPill">${countPillText(list)}</span>
+        <button class="btn primary" id="newPatientBtn" style="margin-left:auto;">＋ 新規患者を追加</button>
+      </div>
+      <div id="patientListArea">${renderPatientListInner(shown)}</div>
+    </div>
+  `;
+}
+
+function renderTemplatesTab(){
+  return `
+    <div class="card" style="padding:18px;">
+      <div class="section-title"><span class="bar"></span>見本テキスト管理</div>
+      <p class="helptext">カルテ入力時にワンタップで挿入できる定型文です。よく使う言い回しを登録しておくと入力の手間を減らせます。</p>
+      <div id="tmplList">
+        ${state.templates.length===0 ? `<div class="empty">登録されている見本テキストはありません</div>` :
+          state.templates.map(t => `
+          <div class="tmpl-list-item" data-id="${escapeHtml(t.templateId)}">
+            <div class="tbody">
+              <div class="ttitle">${escapeHtml(t.title)}</div>
+              <div class="ttext">${escapeHtml(t.text)}</div>
+            </div>
+            <div style="display:flex; flex-direction:column; gap:6px;">
+              <button class="btn sm editTmpl">編集</button>
+              <button class="btn sm danger delTmpl">削除</button>
+            </div>
+          </div>`).join("")
+        }
+      </div>
+      <hr style="border:none; border-top:1px solid var(--line); margin:18px 0;">
+      <div class="section-title" style="font-size:0.92rem;"><span class="bar"></span>新規追加</div>
+      <div class="row">
+        <div><label class="field-label">タイトル</label><input type="text" id="newTmplTitle" placeholder="例）腰痛 初回問診"></div>
+      </div>
+      <div style="margin-top:10px;">
+        <label class="field-label">本文</label>
+        <textarea id="newTmplText" rows="3" placeholder="コピペ用の定型文を入力"></textarea>
+      </div>
+      <div style="margin-top:10px;"><button class="btn amber" id="addTmplBtn">追加する</button></div>
+    </div>
+  `;
+}
+
+function renderStoresTab(){
+  return `
+    <div class="card" style="padding:18px;">
+      <div class="section-title"><span class="bar"></span>店舗管理</div>
+      <p class="helptext">多店舗展開に備えた設定です。店舗ごとに患者・カルテを分けて管理できます。</p>
+      <div id="storeList">
+        ${state.stores.map(s => `
+          <div class="store-list-item" data-id="${escapeHtml(s.storeId)}">
+            <div class="tbody"><b>${escapeHtml(s.name)}</b></div>
+            <button class="btn sm danger delStore">削除</button>
+          </div>`).join("")}
+      </div>
+      <div class="row" style="margin-top:14px;">
+        <div><label class="field-label">新しい店舗名</label><input type="text" id="newStoreName" placeholder="例）〇〇店"></div>
+      </div>
+      <div style="margin-top:10px;"><button class="btn amber" id="addStoreBtn">店舗を追加</button></div>
+    </div>
+  `;
+}
+
+function renderLightbox(){
+  return `<div class="lightbox" id="lightboxOverlay"><button class="x" id="closeLightbox">\u2715</button><img src="${state.lightboxSrc}"></div>`;
+}
+
+/* ---------------- patient modal ---------------- */
+function renderPatientModal(){
+  const p = state.patients.find(x => x.memberId === state.openPatientId);
+  if(!p) return "";
+  const age = calcAge(p.birthdate);
+  const entries = state.karteCache[p.memberId] || [];
+  const sortedEntries = entries.slice().sort((a,b) => (b.date||"").localeCompare(a.date||"") || String(b.createdAt||"").localeCompare(String(a.createdAt||"")));
+
+  return `
+  <div class="overlay" id="patientOverlay">
+    <div class="modal">
+      <div class="modal-head">
+        <div class="pd-avatar">${escapeHtml((p.name||"?").slice(0,1))}</div>
+        <div>
+          <div style="font-size:1.05rem; font-weight:800;">${escapeHtml(p.name)||"（名前未登録）"}</div>
+          <div style="font-size:0.78rem; color:#BFD3CC;">会員番号: ${escapeHtml(p.memberId)}　共通ID（体力測定・姿勢分析ツールと連動予定）</div>
+        </div>
+        <button class="x" id="closePatient">\u2715</button>
+      </div>
+      <div class="modal-body">
+        ${p.notice && p.notice.trim() ? `<div class="notice-preview">\u26a0 ${escapeHtml(p.notice)}</div>` : ""}
+        ${renderPatientEditFields(p, age)}
+
+        <div class="subtabs">
+          <button class="subtab ${state.patientSubtab==='new'?'active':''}" data-subtab="new">新規カルテ入力</button>
+          <button class="subtab ${state.patientSubtab==='history'?'active':''}" data-subtab="history">カルテ履歴（${entries.length}件）</button>
+        </div>
+
+        ${state.patientSubtab === 'new' ? renderNewEntryForm(p) : renderKarteHistory(sortedEntries)}
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderPatientEditFields(p, age){
+  const storeOpts = state.stores.map(s => `<option value="${escapeHtml(s.name)}" ${state.draftPatientStore===s.name?"selected":""}>${escapeHtml(s.name)}</option>`).join("");
+  return `
+  <div class="pd-header">
+    <div class="pd-meta" style="width:100%;">
+      <div class="row">
+        <div><label class="field-label">名前</label><input type="text" id="editName" value="${escapeHtml(state.draftPatientName)}"></div>
+        <div><label class="field-label">生年月日</label><input type="date" id="editBirthdate" value="${escapeHtml(state.draftPatientBirthdate)}"></div>
+        <div><label class="field-label">年齢（自動計算）</label><input type="text" value="${age!==null?age+' 歳':'\u2014'}" disabled></div>
+        <div><label class="field-label">店舗</label><select class="field" id="editStore">${storeOpts}</select></div>
+      </div>
+      <div style="margin-top:10px; display:flex; gap:8px; align-items:center;">
+        <span id="patientAutoSaveStatus" class="helptext">入力内容は自動保存されます</span>
+        <button class="btn sm danger" id="deletePatientBtn" style="margin-left:auto;">この患者を削除</button>
+      </div>
+
+      <div style="margin-top:16px;">
+        <label class="field-label">この患者への伝達事項・注意事項（他スタッフ向け）</label>
+        <textarea id="editNotice" rows="3" placeholder="例）膝の術後のため、うつ伏せ施術は避けてください">${escapeHtml(state.draftNotice)}</textarea>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderNewEntryForm(p){
+  const tmplOpts = `<option value="">-- 見本テキストを選択して挿入 --</option>` + state.templates.map(t => `<option value="${escapeHtml(t.templateId)}">${escapeHtml(t.title)}</option>`).join("");
+  return `
+  <div>
+    <div class="row">
+      <div><label class="field-label">施術日</label><input type="date" id="entryDate" value="${state.draftDate || todayISO()}"></div>
+    </div>
+    <div style="margin-top:14px;">
+      <label class="field-label">本日のサービス内容（複数選択可）</label>
+      <div class="chip-group" id="serviceChips">
+        ${SERVICE_OPTIONS.map(s => `<span class="chip ${state.draftServices.includes(s)?'checked':''}" data-svc="${escapeHtml(s)}">${escapeHtml(s)}</span>`).join("")}
+      </div>
+      <div style="margin-top:8px;"><input type="text" id="freeService" placeholder="その他自由記載（任意）" value="${escapeHtml(state.draftFreeService)}"></div>
+    </div>
+
+    <div style="margin-top:14px;">
+      <label class="field-label">見本テキストを挿入</label>
+      <div class="tmpl-row">
+        <select class="field" id="tmplSelect">${tmplOpts}</select>
+        <button class="btn sm" id="insertTmplBtn">挿入</button>
+      </div>
+    </div>
+
+    <div style="margin-top:10px;">
+      <label class="field-label">カルテ内容</label>
+      <textarea id="entryText" rows="7" placeholder="施術内容・所見などを入力">${escapeHtml(state.draftText)}</textarea>
+    </div>
+
+    <div style="margin-top:14px;">
+      <label class="field-label">写真</label>
+      <div class="img-strip" id="imgStrip">
+        ${state.draftImages.map((src,i) => `
+          <div class="img-thumb"><img src="${src}" data-idx="${i}" class="thumbImg"><button class="rm" data-idx="${i}">\u2715</button></div>
+        `).join("")}
+        <label class="img-add">\u{1f4f7}<br>撮影<input type="file" accept="image/*" capture="environment" id="captureInput" style="display:none;"></label>
+        <label class="img-add">\u{1f5bc}<br>選択<input type="file" accept="image/*" multiple id="galleryInput" style="display:none;"></label>
+      </div>
+    </div>
+
+    <div style="margin-top:18px; display:flex; gap:8px;">
+      <button class="btn primary" id="saveEntryBtn">${state.editingEntryId ? "この内容で更新する" : "カルテを保存する"}</button>
+      ${state.editingEntryId ? `<button class="btn" id="cancelEditBtn">編集をキャンセル</button>` : ""}
+    </div>
+  </div>`;
+}
+
+function renderKarteHistory(entries){
+  if(entries.length === 0) return `<div class="empty">まだカルテ記録がありません</div>`;
+  return entries.map(e => `
+    <div class="entry-card" data-id="${escapeHtml(e.entryId)}">
+      <div class="ehead">
+        <span class="entry-date">${fmtDate(e.date)}</span>
+        ${(e.services||[]).map(s => `<span class="svc-tag">${escapeHtml(s)}</span>`).join("")}
+        ${e.freeService ? `<span class="svc-tag free">${escapeHtml(e.freeService)}</span>` : ""}
+        <div class="entry-actions">
+          <button class="btn sm editEntryBtn">編集</button>
+          <button class="btn sm danger delEntryBtn">削除</button>
+        </div>
+      </div>
+      <div class="entry-text">${escapeHtml(e.text)}</div>
+      ${(e.images && e.images.length) ? `<div class="img-strip">${e.images.map(src => `<div class="img-thumb"><img src="${src}" class="histImg"></div>`).join("")}</div>` : ""}
+    </div>
+  `).join("");
+}
+
+/* ---------------- event binding ---------------- */
+function bindEvents(){
+  const $ = (sel) => document.querySelector(sel);
+  const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+
+  const storeSelect = $("#storeSelect");
+  if(storeSelect) storeSelect.onchange = (e) => { state.currentStore = e.target.value; render(); };
+
+  $$(".tab-btn").forEach(b => b.onclick = () => { state.tab = b.dataset.tab; render(); });
+
+  const closeLb = $("#closeLightbox");
+  if(closeLb) closeLb.onclick = () => { state.lightboxSrc = null; render(); };
+  const lbOverlay = $("#lightboxOverlay");
+  if(lbOverlay) lbOverlay.onclick = (e) => { if(e.target.id==="lightboxOverlay"){ state.lightboxSrc=null; render(); } };
+
+  const searchInput = $("#searchInput");
+  if(searchInput){
+    searchInput.oninput = (e) => {
+      state.search = e.target.value;
+      updatePatientListInline();
+    };
+    if(document.activeElement !== searchInput && state.tab === "patients"){
+      searchInput.focus();
+      searchInput.setSelectionRange(searchInput.value.length, searchInput.value.length);
+    }
+  }
+
+  const newPatientBtn = $("#newPatientBtn");
+  if(newPatientBtn) newPatientBtn.onclick = createNewPatient;
+
+  $$(".prow").forEach(row => row.onclick = () => openPatient(row.dataset.id));
+
+  const addTmplBtn = $("#addTmplBtn");
+  if(addTmplBtn) addTmplBtn.onclick = addTemplate;
+  $$(".editTmpl").forEach(btn => btn.onclick = (e) => editTemplateInline(e.target.closest(".tmpl-list-item")));
+  $$(".delTmpl").forEach(btn => btn.onclick = (e) => deleteTemplate(e.target.closest(".tmpl-list-item").dataset.id));
+
+  const addStoreBtn = $("#addStoreBtn");
+  if(addStoreBtn) addStoreBtn.onclick = addStore;
+  $$(".delStore").forEach(btn => btn.onclick = (e) => deleteStore(e.target.closest(".store-list-item").dataset.id));
+
+  const closePatient = $("#closePatient");
+  if(closePatient) closePatient.onclick = closePatientModal;
+  const patientOverlay = $("#patientOverlay");
+  if(patientOverlay) patientOverlay.onclick = (e) => { if(e.target.id==="patientOverlay") closePatientModal(); };
+
+  const deletePatientBtn = $("#deletePatientBtn");
+  if(deletePatientBtn) deletePatientBtn.onclick = deleteCurrentPatient;
+
+  const editName = $("#editName");
+  if(editName) editName.oninput = (e) => { state.draftPatientName = e.target.value; scheduleAutoSavePatient(); };
+  const editBirthdate = $("#editBirthdate");
+  if(editBirthdate) editBirthdate.onchange = (e) => { state.draftPatientBirthdate = e.target.value; autoSavePatient(); };
+  const editStore = $("#editStore");
+  if(editStore) editStore.onchange = (e) => { state.draftPatientStore = e.target.value; autoSavePatient(); };
+  const editNotice = $("#editNotice");
+  if(editNotice) editNotice.oninput = (e) => { state.draftNotice = e.target.value; scheduleAutoSavePatient(); };
+
+  $$(".subtab").forEach(b => b.onclick = () => { state.patientSubtab = b.dataset.subtab; render(); });
+
+  $$(".chip").forEach(chip => chip.onclick = () => {
+    const svc = chip.dataset.svc;
+    const idx = state.draftServices.indexOf(svc);
+    if(idx >= 0) state.draftServices.splice(idx,1); else state.draftServices.push(svc);
+    render();
+  });
+
+  const freeService = $("#freeService");
+  if(freeService) freeService.oninput = (e) => { state.draftFreeService = e.target.value; };
+
+  const insertTmplBtn = $("#insertTmplBtn");
+  if(insertTmplBtn) insertTmplBtn.onclick = () => {
+    const sel = $("#tmplSelect");
+    const t = state.templates.find(x => x.templateId === sel.value);
+    if(t){
+      const ta = $("#entryText");
+      const sep = ta.value.trim() ? "\n" : "";
+      ta.value = ta.value + sep + t.text;
+      state.draftText = ta.value;
+    }
+  };
+
+  const entryText = $("#entryText");
+  if(entryText) entryText.oninput = (e) => { state.draftText = e.target.value; };
+  const entryDate = $("#entryDate");
+  if(entryDate) entryDate.oninput = (e) => { state.draftDate = e.target.value; };
+
+  const captureInput = $("#captureInput");
+  if(captureInput) captureInput.onchange = (e) => handleImageFiles(e.target.files);
+  const galleryInput = $("#galleryInput");
+  if(galleryInput) galleryInput.onchange = (e) => handleImageFiles(e.target.files);
+
+  $$(".rm").forEach(btn => btn.onclick = () => {
+    const idx = parseInt(btn.dataset.idx,10);
+    state.draftImages.splice(idx,1);
+    render();
+  });
+  $$(".thumbImg, .histImg").forEach(img => img.onclick = () => { state.lightboxSrc = img.src; render(); });
+
+  const saveEntryBtn = $("#saveEntryBtn");
+  if(saveEntryBtn) saveEntryBtn.onclick = saveKarteEntry;
+  const cancelEditBtn = $("#cancelEditBtn");
+  if(cancelEditBtn) cancelEditBtn.onclick = () => { resetDraft(); render(); };
+
+  $$(".editEntryBtn").forEach(btn => btn.onclick = (e) => startEditEntry(e.target.closest(".entry-card").dataset.id));
+  $$(".delEntryBtn").forEach(btn => btn.onclick = (e) => deleteEntry(e.target.closest(".entry-card").dataset.id));
+}
+
+function updatePatientListInline(){
+  const list = visiblePatients().slice().sort((a,b)=>(a.name||"").localeCompare(b.name||"","ja"));
+  const shown = list.slice(0, 200);
+  const area = document.getElementById("patientListArea");
+  const pill = document.getElementById("countPill");
+  if(area) area.innerHTML = renderPatientListInner(shown);
+  if(pill) pill.textContent = countPillText(list);
+  Array.from(document.querySelectorAll(".prow")).forEach(row => row.onclick = () => openPatient(row.dataset.id));
+}
+
+/* ---------------- actions ---------------- */
+function nextMemberId(){
+  let max = 0;
+  state.patients.forEach(p => { const n = parseInt(p.memberId,10); if(!isNaN(n) && n > max) max = n; });
+  return String(max + 1);
+}
+
+async function createNewPatient(){
+  const name = prompt("新しい患者の名前を入力してください");
+  if(name === null) return;
+  const memberId = nextMemberId();
+  const storeName = state.currentStore === "ALL" ? (state.stores[0]?.name || "本店") : (state.stores.find(s=>s.storeId===state.currentStore)?.name || "本店");
+  const patient = { memberId, name: name.trim(), birthdate:"", store: storeName, notice:"", createdAt: new Date().toISOString() };
+
+  state.busy = true; render();
+  const res = await apiPost("savePatient", patient);
+  state.busy = false;
+  if(!res.ok){ alert("保存に失敗しました：" + (res.error||"")); render(); return; }
+  state.patients.push(patient);
+  render();
+  openPatient(memberId);
+}
+
+async function openPatient(id){
+  flushPatientAutoSave();
+  state.openPatientId = id;
+  state.patientSubtab = "new";
+  resetDraft();
+  const p = state.patients.find(x => x.memberId === id);
+  state.draftPatientName = p ? (p.name || "") : "";
+  state.draftPatientBirthdate = p ? (p.birthdate || "") : "";
+  state.draftPatientStore = p ? (p.store || "") : "";
+  state.draftNotice = p ? (p.notice || "") : "";
+  render();
+  await getKarte(id);
+  render();
+}
+
+function closePatientModal(){
+  flushPatientAutoSave();
+  state.openPatientId = null;
+  resetDraft();
+  render();
+}
+
+function resetDraft(){
+  state.draftServices = [];
+  state.draftFreeService = "";
+  state.draftText = "";
+  state.draftImages = [];
+  state.draftDate = todayISO();
+  state.editingEntryId = null;
+}
+
+let patientSaveTimer = null;
+
+function scheduleAutoSavePatient(){
+  clearTimeout(patientSaveTimer);
+  patientSaveTimer = setTimeout(() => { patientSaveTimer = null; autoSavePatient(); }, 800);
+}
+
+function flushPatientAutoSave(){
+  if(patientSaveTimer){
+    clearTimeout(patientSaveTimer);
+    patientSaveTimer = null;
+    autoSavePatient();
+  }
+}
+
+function setPatientSaveStatus(text){
+  const el = document.getElementById("patientAutoSaveStatus");
+  if(el) el.textContent = text;
+}
+
+async function autoSavePatient(){
+  const p = state.patients.find(x => x.memberId === state.openPatientId);
+  if(!p) return;
+  const updated = {
+    ...p,
+    name: state.draftPatientName.trim(),
+    birthdate: state.draftPatientBirthdate,
+    store: state.draftPatientStore,
+    notice: state.draftNotice,
+  };
+  setPatientSaveStatus("保存中...");
+  const res = await apiPost("savePatient", updated);
+  if(res.ok){
+    Object.assign(p, updated);
+    setPatientSaveStatus("自動保存済み \u2713");
+  }else{
+    setPatientSaveStatus("保存に失敗しました");
+  }
+}
+
+async function deleteCurrentPatient(){
+  const p = state.patients.find(x => x.memberId === state.openPatientId);
+  if(!p) return;
+  if(!confirm(`「${p.name || p.memberId}」のカルテ情報を完全に削除します。よろしいですか？`)) return;
+  state.busy = true; render();
+  const res = await apiPost("deletePatient", { memberId: p.memberId });
+  state.busy = false;
+  if(!res.ok){ alert("削除に失敗しました：" + (res.error||"")); render(); return; }
+  state.patients = state.patients.filter(x => x.memberId !== p.memberId);
+  delete state.karteCache[p.memberId];
+  closePatientModal();
+}
+
+async function handleImageFiles(fileList){
+  const files = Array.from(fileList || []);
+  for(const f of files){
+    try{
+      const dataUrl = await compressImage(f);
+      state.draftImages.push(dataUrl);
+    }catch(err){ console.error(err); }
+  }
+  render();
+}
+
+async function saveKarteEntry(){
+  const p = state.patients.find(x => x.memberId === state.openPatientId);
+  if(!p) return;
+  const date = document.getElementById("entryDate").value || todayISO();
+  const text = document.getElementById("entryText").value;
+  const freeService = document.getElementById("freeService").value.trim();
+
+  const payload = {
+    entryId: state.editingEntryId || undefined,
+    memberId: p.memberId,
+    date, services: state.draftServices.slice(), freeService, text,
+    images: state.draftImages.slice(),
+  };
+
+  state.busy = true; render();
+  const res = await apiPost("saveKarteEntry", payload);
+  state.busy = false;
+  if(!res.ok){ alert("カルテの保存に失敗しました：" + (res.error||"")); render(); return; }
+
+  const entries = await getKarteForce(p.memberId);
+  state.karteCache[p.memberId] = entries;
+  resetDraft();
+  state.patientSubtab = "history";
+  render();
+}
+
+async function getKarteForce(patientId){
+  const data = await apiGet({ action: "karte", memberId: patientId });
+  return (data.ok && data.entries) ? data.entries : [];
+}
+
+function startEditEntry(entryId){
+  const entries = state.karteCache[state.openPatientId] || [];
+  const e = entries.find(x => x.entryId === entryId);
+  if(!e) return;
+  state.editingEntryId = entryId;
+  state.draftServices = (e.services||[]).slice();
+  state.draftFreeService = e.freeService || "";
+  state.draftText = e.text || "";
+  state.draftImages = (e.images||[]).slice();
+  state.draftDate = e.date;
+  state.patientSubtab = "new";
+  render();
+}
+
+async function deleteEntry(entryId){
+  if(!confirm("このカルテ記録を削除します。よろしいですか？")) return;
+  const pid = state.openPatientId;
+  state.busy = true; render();
+  const res = await apiPost("deleteKarteEntry", { entryId });
+  state.busy = false;
+  if(!res.ok){ alert("削除に失敗しました：" + (res.error||"")); render(); return; }
+  state.karteCache[pid] = (state.karteCache[pid]||[]).filter(e => e.entryId !== entryId);
+  render();
+}
+
+/* templates */
+async function addTemplate(){
+  const title = document.getElementById("newTmplTitle").value.trim();
+  const text = document.getElementById("newTmplText").value.trim();
+  if(!title || !text){ alert("タイトルと本文を入力してください"); return; }
+  state.busy = true; render();
+  const res = await apiPost("saveTemplate", { title, text });
+  state.busy = false;
+  if(!res.ok){ alert("保存に失敗しました：" + (res.error||"")); render(); return; }
+  state.templates.push({ templateId: res.templateId, title, text });
+  render();
+}
+async function editTemplateInline(itemEl){
+  const id = itemEl.dataset.id;
+  const t = state.templates.find(x => x.templateId === id);
+  if(!t) return;
+  const newTitle = prompt("タイトルを編集", t.title);
+  if(newTitle === null) return;
+  const newText = prompt("本文を編集", t.text);
+  if(newText === null) return;
+  state.busy = true; render();
+  const res = await apiPost("saveTemplate", { templateId: id, title: newTitle.trim(), text: newText.trim() });
+  state.busy = false;
+  if(!res.ok){ alert("保存に失敗しました：" + (res.error||"")); render(); return; }
+  t.title = newTitle.trim(); t.text = newText.trim();
+  render();
+}
+async function deleteTemplate(id){
+  if(!confirm("この見本テキストを削除しますか？")) return;
+  state.busy = true; render();
+  const res = await apiPost("deleteTemplate", { templateId: id });
+  state.busy = false;
+  if(!res.ok){ alert("削除に失敗しました：" + (res.error||"")); render(); return; }
+  state.templates = state.templates.filter(t => t.templateId !== id);
+  render();
+}
+
+/* stores */
+async function addStore(){
+  const name = document.getElementById("newStoreName").value.trim();
+  if(!name) return;
+  state.busy = true; render();
+  const res = await apiPost("saveStore", { name });
+  state.busy = false;
+  if(!res.ok){ alert("保存に失敗しました：" + (res.error||"")); render(); return; }
+  state.stores.push({ storeId: res.storeId, name });
+  render();
+}
+async function deleteStore(id){
+  const s = state.stores.find(x => x.storeId === id);
+  if(!s) return;
+  const inUse = state.patients.some(p => p.store === s.name);
+  if(inUse && !confirm(`「${s.name}」に所属する患者がいます。店舗を削除しても患者データは残ります。削除しますか？`)) return;
+  state.busy = true; render();
+  const res = await apiPost("deleteStore", { storeId: id });
+  state.busy = false;
+  if(!res.ok){ alert("削除に失敗しました：" + (res.error||"")); render(); return; }
+  state.stores = state.stores.filter(x => x.storeId !== id);
+  render();
+}
+
+/* ---------------- boot ---------------- */
+(async function boot(){
+  render();
+  await loadAll();
+  render();
+})();
+</script>
+</body>
+</html>

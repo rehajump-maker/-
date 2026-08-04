@@ -583,7 +583,7 @@ function renderPatientModal(){
         <div class="pd-avatar">${escapeHtml((p.name||"?").slice(0,1))}</div>
         <div>
           <div style="font-size:1.05rem; font-weight:800;">${escapeHtml(p.name)||"（名前未登録）"}</div>
-          <div style="font-size:0.78rem; color:#BFD3CC;">会員番号: ${escapeHtml(p.memberId)}　共通ID（体力測定・姿勢分析ツールと連動予定）</div>
+          <div style="font-size:0.78rem; color:#BFD3CC;">会員番号: ${escapeHtml(p.memberId)}</div>
           <div style="margin-top:6px; display:flex; gap:6px;">
             <a class="btn sm ghost" style="color:#fff; border:1px solid rgba(255,255,255,0.3);" href="${POSTURE_URL}?member=${encodeURIComponent(p.memberId)}" target="_blank" rel="noopener">この患者の姿勢分析を開く</a>
             <a class="btn sm ghost" style="color:#fff; border:1px solid rgba(255,255,255,0.3);" href="${MEASURE_URL}?member=${encodeURIComponent(p.memberId)}" target="_blank" rel="noopener">この患者の体力測定を開く</a>
@@ -1053,11 +1053,6 @@ async function deleteStore(id){
   render();
   await loadAll();
   render();
-  const params = new URLSearchParams(window.location.search);
-  const incomingMember = params.get("member");
-  if(incomingMember && state.patients.some(p => p.memberId === incomingMember)){
-    openPatient(incomingMember);
-  }
 })();
 </script>
 </body>

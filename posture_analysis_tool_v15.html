@@ -115,7 +115,7 @@
 
   <header>
     <h1>Jump式 POSTURE CHECK &nbsp;姿勢分析ツール</h1>
-    <div class="tag">PROTOTYPE v13 — 自動保存・印刷の空欄スキップ対応</div>
+    <div class="tag">PROTOTYPE v15 — 電子カルテ連携(会員番号自動入力)対応</div>
   </header>
 
   <div class="printOnly" id="printPatientLine"></div>
@@ -535,10 +535,10 @@ function setAutoSaveStatus(text){
 
 async function autoSendView(key, viewLabel, posture){
   const name = document.getElementById('pName').value.trim();
-  if(!name){ setAutoSaveStatus('※氏名を入力すると、この面を自動でスプレッドシートに保存できます。'); return; }
+  const memberId = document.getElementById('pMemberId').value.trim();
+  if(!name && !memberId){ setAutoSaveStatus('※会員番号または氏名を入力すると、この面を自動でスプレッドシートに保存できます。'); return; }
   const d = lastResults[key];
   if(!d) return;
-  const memberId = document.getElementById('pMemberId').value.trim();
   const date = document.getElementById('pDate').value || new Date().toISOString().slice(0,10);
   const saveImages = document.getElementById('saveImagesCheck').checked;
   const payloadView = {view: viewLabel, ...d};
@@ -880,7 +880,7 @@ document.getElementById('saveBtn').addEventListener('click', async ()=>{
   const memberId = document.getElementById('pMemberId').value.trim();
   const name = document.getElementById('pName').value.trim();
   const date = document.getElementById('pDate').value || new Date().toISOString().slice(0,10);
-  if(!name){ alert('氏名/IDを入力してください。'); return; }
+  if(!name && !memberId){ alert('会員番号または氏名を入力してください。'); return; }
 
   const saveImages = document.getElementById('saveImagesCheck').checked;
   if(saveImages){

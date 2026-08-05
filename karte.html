@@ -264,12 +264,26 @@
    Jump 電子カルテシステム（Google Sheets/Drive 連携版）
    ============================================================ */
 const API_URL = "https://script.google.com/macros/s/AKfycbwFC16qSarNPEoPsNTp0VMV7n0uZcF7HAED-2UuYBCkD3Aa2wqSzbAJOo6o53_I3ouY/exec";
-const API_TOKEN = "a2ef0716-590b-400a-aa71-42209c5e38cb";
 
 const SERVICE_OPTIONS = ["整体30分","整体50分","パーソナルトレーニング30分","パーソナルトレーニング50分","ジム入会時説明"];
 
 const POSTURE_URL = "https://rehajump-maker.github.io/-/posture_analysis_tool_v16.html";
 const MEASURE_URL = "https://script.google.com/macros/s/AKfycbxmbLCAHgtqFzNrOiFSPvZ0uLn0hhwb5VD14xrSaRG0xhU62k7nImCGIhtXXqvjE_ze/exec";
+
+const AUTH_STORAGE_KEY = "jump_karte_auth";
+
+function loadAuth(){
+  try{
+    const raw = sessionStorage.getItem(AUTH_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  }catch(e){ return null; }
+}
+function saveAuth(auth){
+  try{ sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(auth)); }catch(e){}
+}
+function clearAuth(){
+  try{ sessionStorage.removeItem(AUTH_STORAGE_KEY); }catch(e){}
+}
 
 function uid(prefix){ return prefix + "_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2,8); }
 
@@ -303,22 +317,34 @@ function escapeHtml(s){
 
 /* ---------------- API helpers ---------------- */
 async function apiGet(params){
-  const url = API_URL + "?" + new URLSearchParams(params).toString();
+  const auth = loadAuth();
+  const fullParams = { ...params, token: auth ? auth.token : "" };
+  const url = API_URL + "?" + new URLSearchParams(fullParams).toString();
   const res = await fetch(url);
-  return await res.json();
+  const data = await res.json();
+  if(!data.ok && data.code === "AUTH") handleAuthFailure();
+  return data;
 }
 async function apiPost(action, payload){
+  const auth = loadAuth();
   try{
     const res = await fetch(API_URL, {
       method: "POST",
       headers: {"Content-Type": "text/plain;charset=utf-8"},
-      body: JSON.stringify({ action, token: API_TOKEN, payload })
+      body: JSON.stringify({ action, token: auth ? auth.token : "", payload })
     });
-    return await res.json();
+    const data = await res.json();
+    if(!data.ok && data.code === "AUTH") handleAuthFailure();
+    return data;
   }catch(e){
     console.error("API error:", action, e);
     return { ok:false, error: String(e) };
   }
+}
+function handleAuthFailure(){
+  clearAuth();
+  state.auth = null;
+  render();
 }
 
 /* ---------------- global state ---------------- */
@@ -346,6 +372,9 @@ const state = {
   draftPatientBirthdate: "",
   draftPatientStore: "",
   draftNotice: "",
+  auth: null,
+  loginError: "",
+  loginBusy: false,
 };
 
 /* ---------------- data load ---------------- */
@@ -400,6 +429,11 @@ function compressImage(file){
 /* ---------------- render root ---------------- */
 function render(){
   const app = document.getElementById("app");
+  if(!state.auth){
+    app.innerHTML = renderLoginScreen();
+    bindLoginEvents();
+    return;
+  }
   app.innerHTML = `
     ${renderTopbar()}
     <main>${renderMain()}</main>
@@ -408,6 +442,86 @@ function render(){
     ${state.busy ? renderBusyOverlay() : ""}
   `;
   bindEvents();
+}
+
+function renderLoginScreen(){
+  return `
+  <div style="min-height:100vh; display:flex; align-items:center; justify-content:center; padding:20px;">
+    <div class="card" style="width:100%; max-width:340px; padding:28px 26px;">
+      <div style="text-align:center; margin-bottom:20px;">
+        <span class="mark" style="background:var(--amber); color:var(--pine-deep); font-weight:800; padding:4px 12px; border-radius:6px; font-size:1.1rem;">Jump</span>
+        <div style="font-weight:800; color:var(--pine-deep); margin-top:10px; font-size:1.05rem;">電子カルテシステム</div>
+      </div>
+      <form id="loginForm">
+        <div style="margin-bottom:12px;">
+          <label class="field-label">ユーザー名</label>
+          <input type="text" id="loginUsername" autocomplete="username" required>
+        </div>
+        <div style="margin-bottom:14px;">
+          <label class="field-label">パスワード</label>
+          <input type="password" id="loginPassword" autocomplete="current-password" required>
+        </div>
+        ${state.loginError ? `<div style="color:var(--coral); font-size:0.82rem; margin-bottom:12px;">${escapeHtml(state.loginError)}</div>` : ""}
+        <button type="submit" class="btn primary" style="width:100%;" ${state.loginBusy?"disabled":""}>${state.loginBusy?"ログイン中...":"ログイン"}</button>
+      </form>
+    </div>
+  </div>`;
+}
+
+function bindLoginEvents(){
+  const form = document.getElementById("loginForm");
+  if(form){
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const username = document.getElementById("loginUsername").value.trim();
+      const password = document.getElementById("loginPassword").value;
+      if(!username || !password) return;
+      state.loginBusy = true; state.loginError = ""; render();
+      try{
+        const res = await fetch(API_URL, {
+          method: "POST",
+          headers: {"Content-Type": "text/plain;charset=utf-8"},
+          body: JSON.stringify({ action: "login", payload: { username, password } })
+        });
+        const data = await res.json();
+        state.loginBusy = false;
+        if(data.ok){
+          state.auth = { token: data.token, name: data.name, role: data.role, staffId: data.staffId };
+          saveAuth(state.auth);
+          state.loaded = false;
+          render();
+          await loadAll();
+          render();
+        }else{
+          state.loginError = data.error || "ログインに失敗しました";
+          render();
+        }
+      }catch(err){
+        state.loginBusy = false;
+        state.loginError = "通信エラーが発生しました：" + String(err);
+        render();
+      }
+    };
+  }
+}
+
+async function logout(){
+  const auth = state.auth;
+  clearAuth();
+  state.auth = null;
+  state.loaded = false;
+  state.patients = [];
+  state.karteCache = {};
+  render();
+  if(auth){
+    try{
+      await fetch(API_URL, {
+        method: "POST",
+        headers: {"Content-Type": "text/plain;charset=utf-8"},
+        body: JSON.stringify({ action: "logout", token: auth.token })
+      });
+    }catch(e){}
+  }
 }
 
 function renderBusyOverlay(){
@@ -438,6 +552,10 @@ function renderTopbar(){
     <div class="tabs">
       <a class="tab-btn" href="${POSTURE_URL}" target="_blank" rel="noopener">姿勢分析を開く</a>
       <a class="tab-btn" href="${MEASURE_URL}" target="_blank" rel="noopener">体力測定を開く</a>
+    </div>
+    <div class="tabs" style="align-items:center;">
+      <span style="color:#CBDAD5; font-size:0.82rem;">${escapeHtml(state.auth.name)}さん</span>
+      <button class="tab-btn" id="logoutBtn">ログアウト</button>
     </div>
   </div>`;
 }
@@ -703,7 +821,10 @@ function bindEvents(){
   const storeSelect = $("#storeSelect");
   if(storeSelect) storeSelect.onchange = (e) => { state.currentStore = e.target.value; render(); };
 
-  $$(".tab-btn").forEach(b => b.onclick = () => { state.tab = b.dataset.tab; render(); });
+  $$(".tab-btn[data-tab]").forEach(b => b.onclick = () => { state.tab = b.dataset.tab; render(); });
+
+  const logoutBtn = $("#logoutBtn");
+  if(logoutBtn) logoutBtn.onclick = () => { logout(); };
 
   const closeLb = $("#closeLightbox");
   if(closeLb) closeLb.onclick = () => { state.lightboxSrc = null; render(); };
@@ -1050,9 +1171,12 @@ async function deleteStore(id){
 
 /* ---------------- boot ---------------- */
 (async function boot(){
+  state.auth = loadAuth();
   render();
-  await loadAll();
-  render();
+  if(state.auth){
+    await loadAll();
+    render();
+  }
 })();
 </script>
 </body>

@@ -347,6 +347,14 @@ function handleAuthFailure(){
   render();
 }
 
+async function openLinkedSystem(baseUrl, memberId){
+  const res = await apiPost("issueLinkToken", { memberId: memberId || "" });
+  if(!res.ok){ alert("リンクの生成に失敗しました：" + (res.error||"")); return; }
+  const params = new URLSearchParams({ exp: res.exp, sig: res.sig });
+  if(memberId) params.set("member", memberId);
+  window.open(baseUrl + "?" + params.toString(), "_blank", "noopener");
+}
+
 /* ---------------- global state ---------------- */
 const state = {
   patients: [],
@@ -550,8 +558,8 @@ function renderTopbar(){
       <button class="tab-btn ${state.tab==='stores'?'active':''}" data-tab="stores">店舗管理</button>
     </div>
     <div class="tabs">
-      <a class="tab-btn" href="${POSTURE_URL}" target="_blank" rel="noopener">姿勢分析を開く</a>
-      <a class="tab-btn" href="${MEASURE_URL}" target="_blank" rel="noopener">体力測定を開く</a>
+      <button class="tab-btn" id="openPostureBtn">姿勢分析を開く</button>
+      <button class="tab-btn" id="openMeasureBtn">体力測定を開く</button>
     </div>
     <div class="tabs" style="align-items:center;">
       <span style="color:#CBDAD5; font-size:0.82rem;">${escapeHtml(state.auth.name)}さん</span>
@@ -703,8 +711,8 @@ function renderPatientModal(){
           <div style="font-size:1.05rem; font-weight:800;">${escapeHtml(p.name)||"（名前未登録）"}</div>
           <div style="font-size:0.78rem; color:#BFD3CC;">会員番号: ${escapeHtml(p.memberId)}</div>
           <div style="margin-top:6px; display:flex; gap:6px;">
-            <a class="btn sm ghost" style="color:#fff; border:1px solid rgba(255,255,255,0.3);" href="${POSTURE_URL}?member=${encodeURIComponent(p.memberId)}" target="_blank" rel="noopener">この患者の姿勢分析を開く</a>
-            <a class="btn sm ghost" style="color:#fff; border:1px solid rgba(255,255,255,0.3);" href="${MEASURE_URL}?member=${encodeURIComponent(p.memberId)}" target="_blank" rel="noopener">この患者の体力測定を開く</a>
+            <button class="btn sm ghost" style="color:#fff; border:1px solid rgba(255,255,255,0.3);" id="openPosturePatientBtn" data-member="${escapeHtml(p.memberId)}">この患者の姿勢分析を開く</button>
+            <button class="btn sm ghost" style="color:#fff; border:1px solid rgba(255,255,255,0.3);" id="openMeasurePatientBtn" data-member="${escapeHtml(p.memberId)}">この患者の体力測定を開く</button>
           </div>
         </div>
         <button class="x" id="closePatient">\u2715</button>
@@ -825,6 +833,15 @@ function bindEvents(){
 
   const logoutBtn = $("#logoutBtn");
   if(logoutBtn) logoutBtn.onclick = () => { logout(); };
+
+  const openPostureBtn = $("#openPostureBtn");
+  if(openPostureBtn) openPostureBtn.onclick = () => openLinkedSystem(POSTURE_URL, "");
+  const openMeasureBtn = $("#openMeasureBtn");
+  if(openMeasureBtn) openMeasureBtn.onclick = () => openLinkedSystem(MEASURE_URL, "");
+  const openPosturePatientBtn = $("#openPosturePatientBtn");
+  if(openPosturePatientBtn) openPosturePatientBtn.onclick = () => openLinkedSystem(POSTURE_URL, openPosturePatientBtn.dataset.member);
+  const openMeasurePatientBtn = $("#openMeasurePatientBtn");
+  if(openMeasurePatientBtn) openMeasurePatientBtn.onclick = () => openLinkedSystem(MEASURE_URL, openMeasurePatientBtn.dataset.member);
 
   const closeLb = $("#closeLightbox");
   if(closeLb) closeLb.onclick = () => { state.lightboxSrc = null; render(); };

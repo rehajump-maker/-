@@ -705,7 +705,10 @@ function renderPatientModal(){
         <div class="pd-avatar">${escapeHtml((p.name||"?").slice(0,1))}</div>
         <div>
           <div style="font-size:1.05rem; font-weight:800;">${escapeHtml(p.name)||"（名前未登録）"}</div>
-          <div style="font-size:0.78rem; color:#BFD3CC;">会員番号: ${escapeHtml(p.memberId)}</div>
+          <div style="font-size:0.78rem; color:#BFD3CC;">
+            会員番号: <span id="memberIdDisplay">${escapeHtml(p.memberId)}</span>
+            <button class="btn sm ghost" id="editMemberIdBtn" style="color:#fff; border:1px solid rgba(255,255,255,0.3); padding:2px 8px; font-size:0.7rem; margin-left:4px;">編集</button>
+          </div>
           <div style="margin-top:6px; display:flex; gap:6px;">
             <a class="btn sm ghost" style="color:#fff; border:1px solid rgba(255,255,255,0.3);" href="${linkedSystemUrl(POSTURE_URL, p.memberId)}" target="_blank" rel="noopener">この患者の姿勢分析を開く</a>
             <a class="btn sm ghost" style="color:#fff; border:1px solid rgba(255,255,255,0.3);" href="${linkedSystemUrl(MEASURE_URL, p.memberId)}" target="_blank" rel="noopener">この患者の体力測定を開く</a>
@@ -869,6 +872,9 @@ function bindEvents(){
   const deletePatientBtn = $("#deletePatientBtn");
   if(deletePatientBtn) deletePatientBtn.onclick = deleteCurrentPatient;
 
+  const editMemberIdBtn = $("#editMemberIdBtn");
+  if(editMemberIdBtn) editMemberIdBtn.onclick = changeCurrentPatientMemberId;
+
   const editName = $("#editName");
   if(editName) editName.oninput = (e) => { state.draftPatientName = e.target.value; scheduleAutoSavePatient(); };
   const editBirthdate = $("#editBirthdate");
@@ -948,7 +954,15 @@ function nextMemberId(){
 async function createNewPatient(){
   const name = prompt("新しい患者の名前を入力してください");
   if(name === null) return;
-  const memberId = nextMemberId();
+  const suggested = nextMemberId();
+  const memberIdInput = prompt("会員番号を入力してください（既存の顧客管理システムのIDに合わせてください）", suggested);
+  if(memberIdInput === null) return;
+  const memberId = memberIdInput.trim();
+  if(!memberId){ alert("会員番号を入力してください"); return; }
+  if(state.patients.some(p => p.memberId === memberId)){
+    alert("その会員番号は既に使われています。別の番号を入力してください。");
+    return;
+  }
   const storeName = state.currentStore === "ALL" ? (state.stores[0]?.name || "本店") : (state.stores.find(s=>s.storeId===state.currentStore)?.name || "本店");
   const patient = { memberId, name: name.trim(), birthdate:"", store: storeName, notice:"", createdAt: new Date().toISOString() };
 
@@ -1043,6 +1057,36 @@ async function deleteCurrentPatient(){
   state.patients = state.patients.filter(x => x.memberId !== p.memberId);
   delete state.karteCache[p.memberId];
   closePatientModal();
+}
+
+async function changeCurrentPatientMemberId(){
+  const p = state.patients.find(x => x.memberId === state.openPatientId);
+  if(!p) return;
+  const input = prompt("新しい会員番号を入力してください（既存の顧客管理システムのIDに合わせてください）", p.memberId);
+  if(input === null) return;
+  const newId = input.trim();
+  if(!newId){ alert("会員番号を入力してください"); return; }
+  if(newId === p.memberId) return;
+  if(state.patients.some(x => x.memberId === newId)){
+    alert("その会員番号は既に使われています。別の番号を入力してください。");
+    return;
+  }
+  if(!confirm(`会員番号を「${p.memberId}」から「${newId}」に変更します。よろしいですか？`)) return;
+
+  flushPatientAutoSave();
+  const oldId = p.memberId;
+  state.busy = true; render();
+  const res = await apiPost("changePatientMemberId", { oldMemberId: oldId, newMemberId: newId });
+  state.busy = false;
+  if(!res.ok){ alert("会員番号の変更に失敗しました：" + (res.error||"")); render(); return; }
+
+  p.memberId = newId;
+  if(state.karteCache[oldId]){
+    state.karteCache[newId] = state.karteCache[oldId].map(e => ({...e, memberId: newId}));
+    delete state.karteCache[oldId];
+  }
+  state.openPatientId = newId;
+  render();
 }
 
 async function handleImageFiles(fileList){

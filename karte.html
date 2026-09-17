@@ -397,7 +397,8 @@ async function loadAll(){
     if(!state.selectedRecorderId){
       const saved = localStorage.getItem("jump_karte_recorder_id");
       if(saved && state.staffList.some(s => s.staffId === saved)) state.selectedRecorderId = saved;
-      else if(state.staffList.length) state.selectedRecorderId = state.staffList[0].staffId;
+      // 保存履歴が無い場合は自動選択しない（未選択のまま。誤って別人の名前で
+      // 記録されるのを防ぐため、保存時に明示的な選択を必須にしている）
     }
     state.loaded = true;
   }catch(e){
@@ -771,7 +772,7 @@ function renderNewEntryForm(p){
   <div>
     <div class="row">
       <div><label class="field-label">施術日</label><input type="date" id="entryDate" value="${state.draftDate || todayISO()}"></div>
-      <div><label class="field-label">記載者</label><select class="field" id="recorderSelect">${state.staffList.map(s => `<option value="${escapeHtml(s.staffId)}" ${state.selectedRecorderId===s.staffId?"selected":""}>${escapeHtml(s.name)}</option>`).join("")}</select></div>
+      <div><label class="field-label">記載者</label><select class="field" id="recorderSelect"><option value="" ${!state.selectedRecorderId?"selected":""}>-- 選択してください --</option>${state.staffList.map(s => `<option value="${escapeHtml(s.staffId)}" ${state.selectedRecorderId===s.staffId?"selected":""}>${escapeHtml(s.name)}</option>`).join("")}</select></div>
     </div>
     <div style="margin-top:14px;">
       <label class="field-label">本日のサービス内容（複数選択可）</label>
@@ -1122,6 +1123,10 @@ async function saveKarteEntry(){
   if(state.savingKarte) return; // 二重送信の防止
   const p = state.patients.find(x => x.memberId === state.openPatientId);
   if(!p) return;
+  if(!state.selectedRecorderId){
+    alert("「記載者」を選択してから保存してください。");
+    return;
+  }
   const date = document.getElementById("entryDate").value || todayISO();
   const text = document.getElementById("entryText").value;
   const freeService = document.getElementById("freeService").value.trim();

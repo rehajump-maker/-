@@ -356,7 +356,7 @@ const state = {
   patients: [],
   templates: [],
   stores: [],
-  staffList: [],
+  recorders: [],
   selectedRecorderId: null,
   currentStore: "ALL",
   tab: "patients",
@@ -393,10 +393,10 @@ async function loadAll(){
     state.patients = (data.patients || []).map(p => ({...p, memberId: String(p.memberId)}));
     state.templates = data.templates || [];
     state.stores = data.stores || [];
-    state.staffList = data.staffList || [];
+    state.recorders = data.recorders || [];
     if(!state.selectedRecorderId){
       const saved = localStorage.getItem("jump_karte_recorder_id");
-      if(saved && state.staffList.some(s => s.staffId === saved)) state.selectedRecorderId = saved;
+      if(saved && state.recorders.some(s => s.recorderId === saved)) state.selectedRecorderId = saved;
       // 保存履歴が無い場合は自動選択しない（未選択のまま。誤って別人の名前で
       // 記録されるのを防ぐため、保存時に明示的な選択を必須にしている）
     }
@@ -563,6 +563,7 @@ function renderTopbar(){
       <button class="tab-btn ${state.tab==='patients'?'active':''}" data-tab="patients">患者一覧</button>
       <button class="tab-btn ${state.tab==='templates'?'active':''}" data-tab="templates">見本テキスト管理</button>
       <button class="tab-btn ${state.tab==='stores'?'active':''}" data-tab="stores">店舗管理</button>
+      ${state.auth && state.auth.role === "admin" ? `<button class="tab-btn ${state.tab==='recorders'?'active':''}" data-tab="recorders">記載者管理</button>` : ""}
     </div>
     <div class="tabs">
       <a class="tab-btn" href="${POSTURE_URL}" target="_blank" rel="noopener">姿勢分析を開く</a>
@@ -598,6 +599,7 @@ function renderMain(){
   if(state.tab === "patients") return renderPatientsTab();
   if(state.tab === "templates") return renderTemplatesTab();
   if(state.tab === "stores") return renderStoresTab();
+  if(state.tab === "recorders") return renderRecordersTab();
   return "";
 }
 
@@ -697,6 +699,26 @@ function renderStoresTab(){
   `;
 }
 
+function renderRecordersTab(){
+  return `
+    <div class="card" style="padding:18px;">
+      <div class="section-title"><span class="bar"></span>記載者管理</div>
+      <p class="helptext">カルテ入力時の「記載者」プルダウンに表示される名前の一覧です。ログイン用のアカウントとは別に管理されます（管理者のみ編集できます）。</p>
+      <div id="recorderList">
+        ${state.recorders.map(r => `
+          <div class="store-list-item" data-id="${escapeHtml(r.recorderId)}">
+            <div class="tbody"><b>${escapeHtml(r.name)}</b></div>
+            <button class="btn sm danger delRecorder">削除</button>
+          </div>`).join("")}
+      </div>
+      <div class="row" style="margin-top:14px;">
+        <div><label class="field-label">新しい記載者名</label><input type="text" id="newRecorderName" placeholder="例）田中"></div>
+      </div>
+      <div style="margin-top:10px;"><button class="btn amber" id="addRecorderBtn">記載者を追加</button></div>
+    </div>
+  `;
+}
+
 function renderLightbox(){
   return `<div class="lightbox" id="lightboxOverlay"><button class="x" id="closeLightbox">\u2715</button><img src="${state.lightboxSrc}"></div>`;
 }
@@ -772,7 +794,7 @@ function renderNewEntryForm(p){
   <div>
     <div class="row">
       <div><label class="field-label">施術日</label><input type="date" id="entryDate" value="${state.draftDate || todayISO()}"></div>
-      <div><label class="field-label">記載者</label><select class="field" id="recorderSelect"><option value="" ${!state.selectedRecorderId?"selected":""}>-- 選択してください --</option>${state.staffList.map(s => `<option value="${escapeHtml(s.staffId)}" ${state.selectedRecorderId===s.staffId?"selected":""}>${escapeHtml(s.name)}</option>`).join("")}</select></div>
+      <div><label class="field-label">記載者</label><select class="field" id="recorderSelect"><option value="" ${!state.selectedRecorderId?"selected":""}>-- 選択してください --</option>${state.recorders.map(s => `<option value="${escapeHtml(s.recorderId)}" ${state.selectedRecorderId===s.recorderId?"selected":""}>${escapeHtml(s.name)}</option>`).join("")}</select></div>
     </div>
     <div style="margin-top:14px;">
       <label class="field-label">本日のサービス内容（複数選択可）</label>
@@ -876,6 +898,10 @@ function bindEvents(){
   const addStoreBtn = $("#addStoreBtn");
   if(addStoreBtn) addStoreBtn.onclick = addStore;
   $$(".delStore").forEach(btn => btn.onclick = (e) => deleteStore(e.target.closest(".store-list-item").dataset.id));
+
+  const addRecorderBtn = $("#addRecorderBtn");
+  if(addRecorderBtn) addRecorderBtn.onclick = addRecorder;
+  $$(".delRecorder").forEach(btn => btn.onclick = (e) => deleteRecorder(e.target.closest(".store-list-item").dataset.id));
 
   const closePatient = $("#closePatient");
   if(closePatient) closePatient.onclick = closePatientModal;
@@ -1144,7 +1170,7 @@ async function saveKarteEntry(){
     memberId: p.memberId,
     date, services: state.draftServices.slice(), freeService, text,
     images: state.draftImages.slice(),
-    recordedByStaffId: state.selectedRecorderId || null,
+    recordedByRecorderId: state.selectedRecorderId || null,
   };
 
   state.busy = true; state.savingKarte = true; render();
@@ -1252,6 +1278,32 @@ async function deleteStore(id){
   state.busy = false;
   if(!res.ok){ alert("削除に失敗しました：" + (res.error||"")); render(); return; }
   state.stores = state.stores.filter(x => x.storeId !== id);
+  render();
+}
+
+async function addRecorder(){
+  const name = document.getElementById("newRecorderName").value.trim();
+  if(!name) return;
+  state.busy = true; render();
+  const res = await apiPost("saveRecorder", { name });
+  state.busy = false;
+  if(!res.ok){ alert("保存に失敗しました：" + (res.error||"")); render(); return; }
+  state.recorders.push({ recorderId: res.recorderId, name });
+  render();
+}
+async function deleteRecorder(id){
+  const r = state.recorders.find(x => x.recorderId === id);
+  if(!r) return;
+  if(!confirm(`記載者「${r.name}」を一覧から削除します。過去に記録済みのカルテの「記載者」表示には影響しません。削除しますか？`)) return;
+  state.busy = true; render();
+  const res = await apiPost("deleteRecorder", { recorderId: id });
+  state.busy = false;
+  if(!res.ok){ alert("削除に失敗しました：" + (res.error||"")); render(); return; }
+  state.recorders = state.recorders.filter(x => x.recorderId !== id);
+  if(state.selectedRecorderId === id){
+    state.selectedRecorderId = null;
+    try{ localStorage.removeItem("jump_karte_recorder_id"); }catch(e){}
+  }
   render();
 }
 

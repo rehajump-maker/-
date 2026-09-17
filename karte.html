@@ -356,6 +356,8 @@ const state = {
   patients: [],
   templates: [],
   stores: [],
+  staffList: [],
+  selectedRecorderId: null,
   currentStore: "ALL",
   tab: "patients",
   search: "",
@@ -368,6 +370,8 @@ const state = {
   draftImages: [],
   draftDate: todayISO(),
   editingEntryId: null,
+  draftEntryId: null,
+  savingKarte: false,
   lightboxSrc: null,
   loaded: false,
   busy: false,
@@ -389,6 +393,12 @@ async function loadAll(){
     state.patients = (data.patients || []).map(p => ({...p, memberId: String(p.memberId)}));
     state.templates = data.templates || [];
     state.stores = data.stores || [];
+    state.staffList = data.staffList || [];
+    if(!state.selectedRecorderId){
+      const saved = localStorage.getItem("jump_karte_recorder_id");
+      if(saved && state.staffList.some(s => s.staffId === saved)) state.selectedRecorderId = saved;
+      else if(state.staffList.length) state.selectedRecorderId = state.staffList[0].staffId;
+    }
     state.loaded = true;
   }catch(e){
     state.loadError = String(e);
@@ -761,6 +771,7 @@ function renderNewEntryForm(p){
   <div>
     <div class="row">
       <div><label class="field-label">施術日</label><input type="date" id="entryDate" value="${state.draftDate || todayISO()}"></div>
+      <div><label class="field-label">記載者</label><select class="field" id="recorderSelect">${state.staffList.map(s => `<option value="${escapeHtml(s.staffId)}" ${state.selectedRecorderId===s.staffId?"selected":""}>${escapeHtml(s.name)}</option>`).join("")}</select></div>
     </div>
     <div style="margin-top:14px;">
       <label class="field-label">本日のサービス内容（複数選択可）</label>
@@ -794,9 +805,9 @@ function renderNewEntryForm(p){
       </div>
     </div>
 
-    <div style="margin-top:18px; display:flex; gap:8px;">
-      <button class="btn primary" id="saveEntryBtn">${state.editingEntryId ? "この内容で更新する" : "カルテを保存する"}</button>
-      ${state.editingEntryId ? `<button class="btn" id="cancelEditBtn">編集をキャンセル</button>` : ""}
+    <div style="margin-top:18px; display:flex; gap:8px; align-items:center;">
+      <button class="btn primary" id="saveEntryBtn" ${state.savingKarte ? "disabled" : ""}>${state.savingKarte ? "保存中です…（写真がある場合は時間がかかります）" : (state.editingEntryId ? "この内容で更新する" : "カルテを保存する")}</button>
+      ${state.editingEntryId && !state.savingKarte ? `<button class="btn" id="cancelEditBtn">編集をキャンセル</button>` : ""}
     </div>
   </div>`;
 }
@@ -807,6 +818,7 @@ function renderKarteHistory(entries){
     <div class="entry-card" data-id="${escapeHtml(e.entryId)}">
       <div class="ehead">
         <span class="entry-date">${fmtDate(e.date)}</span>
+        ${e.recordedBy ? `<span class="svc-tag" style="background:var(--surface-2); color:var(--ink-soft);">記載者: ${escapeHtml(e.recordedBy)}</span>` : ""}
         ${(e.services||[]).map(s => `<span class="svc-tag">${escapeHtml(s)}</span>`).join("")}
         ${e.freeService ? `<span class="svc-tag free">${escapeHtml(e.freeService)}</span>` : ""}
         <div class="entry-actions">
@@ -912,6 +924,11 @@ function bindEvents(){
   if(entryText) entryText.oninput = (e) => { state.draftText = e.target.value; };
   const entryDate = $("#entryDate");
   if(entryDate) entryDate.oninput = (e) => { state.draftDate = e.target.value; };
+  const recorderSelect = $("#recorderSelect");
+  if(recorderSelect) recorderSelect.onchange = (e) => {
+    state.selectedRecorderId = e.target.value;
+    try{ localStorage.setItem("jump_karte_recorder_id", e.target.value); }catch(err){}
+  };
 
   const captureInput = $("#captureInput");
   if(captureInput) captureInput.onchange = (e) => handleImageFiles(e.target.files);
@@ -1004,6 +1021,7 @@ function resetDraft(){
   state.draftImages = [];
   state.draftDate = todayISO();
   state.editingEntryId = null;
+  state.draftEntryId = null;
 }
 
 let patientSaveTimer = null;
@@ -1101,24 +1119,39 @@ async function handleImageFiles(fileList){
 }
 
 async function saveKarteEntry(){
+  if(state.savingKarte) return; // 二重送信の防止
   const p = state.patients.find(x => x.memberId === state.openPatientId);
   if(!p) return;
   const date = document.getElementById("entryDate").value || todayISO();
   const text = document.getElementById("entryText").value;
   const freeService = document.getElementById("freeService").value.trim();
 
+  // このカルテの保存を指すIDは最初の送信時に一度だけ発行し、以後は使い回す。
+  // 通信が不安定で「失敗」と表示され、もう一度保存し直した場合でも、
+  // 同じIDで送られるため裏側では「上書き」扱いになり、重複した記録は作られない。
+  if(!state.editingEntryId && !state.draftEntryId){
+    state.draftEntryId = uid("entry");
+  }
+  const entryId = state.editingEntryId || state.draftEntryId;
+
   const payload = {
-    entryId: state.editingEntryId || undefined,
+    entryId,
     memberId: p.memberId,
     date, services: state.draftServices.slice(), freeService, text,
     images: state.draftImages.slice(),
+    recordedByStaffId: state.selectedRecorderId || null,
   };
 
-  state.busy = true; render();
+  state.busy = true; state.savingKarte = true; render();
   const res = await apiPost("saveKarteEntry", payload);
-  state.busy = false;
-  if(!res.ok){ alert("カルテの保存に失敗しました：" + (res.error||"")); render(); return; }
+  state.busy = false; state.savingKarte = false;
+  if(!res.ok){
+    alert("カルテの保存に失敗しました：" + (res.error||"") + "\n\n写真が複数枚ある場合、保存に時間がかかることがあります。もう一度「保存」を押しても、直前の保存が実際には完了していれば重複はしません。");
+    render();
+    return;
+  }
 
+  state.draftEntryId = null;
   const entries = await getKarteForce(p.memberId);
   state.karteCache[p.memberId] = entries;
   resetDraft();

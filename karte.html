@@ -245,6 +245,18 @@
   .helptext{font-size:0.78rem; color:var(--ink-soft); margin-top:4px; line-height:1.5;}
   .idlink{font-family:ui-monospace,Menlo,monospace; font-weight:700; background:var(--pine-soft); color:var(--pine-deep); padding:1px 6px; border-radius:5px;}
 
+  /* 体力測定チェック */
+  .fit-badge{display:inline-block; font-size:0.74rem; font-weight:700; padding:2px 8px; border-radius:999px; white-space:nowrap;}
+  .fit-badge.ok{background:var(--pine-soft); color:var(--pine-deep);}
+  .fit-badge.warn{background:#fff1cf; color:#8a5a00;}
+  .fit-badge.bad{background:var(--coral-soft); color:#a3301a;}
+  .fit-box{margin-top:16px; border:1px solid var(--line); border-radius:10px; padding:12px 14px; background:var(--surface-2);}
+  .fit-box table{width:100%; border-collapse:collapse; font-size:0.84rem; margin-top:8px;}
+  .fit-box td, .fit-box th{padding:5px 6px; border-bottom:1px solid var(--line); text-align:left;}
+  .fit-box .done{color:var(--pine-deep); font-weight:700;}
+  .fit-box .miss{color:#a3301a; font-weight:700;}
+  .fit-add{display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end; margin-top:10px;}
+
   @media (max-width:640px){
     main{padding:10px;}
     .row{flex-direction:column;}
@@ -265,7 +277,8 @@
    ============================================================ */
 const API_URL = "https://script.google.com/macros/s/AKfycbwFC16qSarNPEoPsNTp0VMV7n0uZcF7HAED-2UuYBCkD3Aa2wqSzbAJOo6o53_I3ouY/exec";
 
-const SERVICE_OPTIONS = ["整体30分","整体50分","パーソナルトレーニング30分","パーソナルトレーニング50分","ジム入会時説明"];
+const ATTACH_SLOTS = ["問診票","同意書","検査用紙１","検査用紙２","記載カルテ"]; // 「初回」で添付を確認する書類
+const SERVICE_OPTIONS = ["初回","整体30分","整体50分","パーソナルトレーニング30分","パーソナルトレーニング50分","ジム入会時説明"];
 
 const POSTURE_URL = "https://script.google.com/macros/s/AKfycbyeLBPXltoCYEU4RVKd-mdCVSbQBK-GozM7QHk9CZBOw1y2chwaNNLlCTGsUNMjBG0pZQ/exec";
 const MEASURE_URL = "https://script.google.com/macros/s/AKfycbxSzEc0TfwM3uxyAjHe2kDYloNIYljba3p00nKr1-RfDpyY3GWQB5Rxx_AsA5Ae8UzGKg/exec";
@@ -351,8 +364,81 @@ function linkedSystemUrl(baseUrl, memberId){
   return memberId ? (baseUrl + "?member=" + encodeURIComponent(memberId)) : baseUrl;
 }
 
+/*FIT_LOGIC_START*/
+/* ---------------- 体力測定チェック（判定ロジック） ----------------
+   ・初回：入会日から1か月以内に1回
+   ・年2回：3月・9月。その月の間に1回できていればOK
+   ・入会月そのものは3月・9月でも対象外（初回で代替）            */
+function fitYm(iso){ return iso ? String(iso).slice(0,7) : ""; }
+function fitPad(n){ return String(n).padStart(2,"0"); }
+function fitAddOneMonth(iso){
+  const a = String(iso).split("-").map(Number);
+  let y = a[0], m = a[1] + 1;
+  if(m > 12){ m = 1; y++; }
+  const last = new Date(y, m, 0).getDate();
+  return y + "-" + fitPad(m) + "-" + fitPad(Math.min(a[2], last));
+}
+function fitMD(iso){ const a = String(iso).split("-"); return Number(a[1]) + "/" + Number(a[2]); }
+function fitMonthLabel(key){ const a = key.split("-"); return a[0] + "年" + Number(a[1]) + "月"; }
+function computeFitnessStatus(p, checks, todayStr){
+  if(!(p.ptMember === true || String(p.ptMember).toUpperCase() === "TRUE")) return null;
+  const start = p.ptStartDate;
+  if(!start){
+    return { level:"warn", label:"入会日未設定", detail:"入会日を入力すると、体力測定の要否を判定します。", periods:[], needsAction:true };
+  }
+  const dates = (checks || []).map(c => c.date).filter(Boolean).sort();
+  const startKey = fitYm(start), curKey = fitYm(todayStr);
+  const deadline = fitAddOneMonth(start);
+  const initialDone = dates.length > 0;
+
+  // 対象の月（3月・9月）：入会月より後 かつ 今月まで
+  const periods = [];
+  let y = Number(startKey.slice(0,4)), m = Number(startKey.slice(5,7));
+  for(;;){
+    m++; if(m > 12){ m = 1; y++; }
+    const key = y + "-" + fitPad(m);
+    if(key > curKey) break;
+    if(m === 3 || m === 9) periods.push({ key, label: fitMonthLabel(key), done: dates.some(d => fitYm(d) === key) });
+  }
+
+  // 次回予定（今月が未実施の3月・9月なら今月）
+  let nextDue = "";
+  {
+    let ny = Number(curKey.slice(0,4)), nm = Number(curKey.slice(5,7));
+    for(let i = 0; i < 14; i++){
+      const key = ny + "-" + fitPad(nm);
+      if((nm === 3 || nm === 9) && key > startKey){
+        const doneThis = dates.some(d => fitYm(d) === key);
+        if(key > curKey || !doneThis){ nextDue = fitMonthLabel(key); break; }
+      }
+      nm++; if(nm > 12){ nm = 1; ny++; }
+    }
+  }
+
+  const base = { periods, deadline, initialDone, nextDue };
+  if(!initialDone){
+    if(todayStr <= deadline) return { ...base, level:"warn", label:"初回未実施(~"+fitMD(deadline)+")", detail:"初回の体力測定がまだです。期限：" + deadline, needsAction:true };
+    return { ...base, level:"bad", label:"初回期限切れ", detail:"初回の体力測定が期限（" + deadline + "）までに記録されていません。", needsAction:true };
+  }
+  if(periods.length === 0){
+    return { ...base, level:"ok", label:"実施済", detail:"初回実施済み。" + (nextDue ? "次回：" + nextDue : ""), needsAction:false };
+  }
+  const last = periods[periods.length - 1];
+  if(last.done) return { ...base, level:"ok", label:"実施済", detail:"最新の定期測定（" + last.label + "）は実施済み。" + (nextDue ? "次回：" + nextDue : ""), needsAction:false };
+  if(last.key === curKey) return { ...base, level:"warn", label:"今月実施が必要", detail:last.label + "の定期測定がまだです。", needsAction:true };
+  if(dates.some(d => fitYm(d) > last.key)) return { ...base, level:"ok", label:"実施済(遅れ)", detail:last.label + "分は遅れて実施済み。" + (nextDue ? "次回：" + nextDue : ""), needsAction:false };
+  return { ...base, level:"bad", label:"未実施(" + Number(last.key.slice(5,7)) + "月分)", detail:last.label + "の定期測定が未実施です。", needsAction:true };
+}
+/*FIT_LOGIC_END*/
+
 /* ---------------- global state ---------------- */
 const state = {
+  fitnessChecks: [],
+  draftImageLabels: [],
+  confirmSave: null,
+  fitFilter: "all",
+  draftFitDate: "",
+  fitBusy: false,
   patients: [],
   templates: [],
   stores: [],
@@ -391,6 +477,7 @@ async function loadAll(){
     const data = await apiGet({ action: "bootstrap" });
     if(!data.ok){ state.loadError = data.error || "読み込みに失敗しました"; return; }
     state.patients = (data.patients || []).map(p => ({...p, memberId: String(p.memberId)}));
+    state.fitnessChecks = (data.fitnessChecks || []).map(c => ({...c, memberId: String(c.memberId)}));
     state.templates = data.templates || [];
     state.stores = data.stores || [];
     state.recorders = data.recorders || [];
@@ -455,6 +542,7 @@ function render(){
     ${state.openPatientId ? renderPatientModal() : ""}
     ${state.lightboxSrc ? renderLightbox() : ""}
     ${state.busy ? renderBusyOverlay() : ""}
+    ${renderConfirmSave()}
   `;
   bindEvents();
 }
@@ -586,7 +674,99 @@ function visiblePatients(){
     const q = state.search.trim().toLowerCase();
     list = list.filter(p => (p.name||"").toLowerCase().includes(q) || String(p.memberId).includes(q));
   }
+  if(state.fitFilter === "plan") list = list.filter(p => p.planDue);
+  if(state.fitFilter === "pt") list = list.filter(p => fitStatusOf(p));
+  if(state.fitFilter === "todo") list = list.filter(p => { const s = fitStatusOf(p); return s && s.needsAction; });
   return list;
+}
+
+function fitChecksOf(memberId){ return state.fitnessChecks.filter(c => c.memberId === String(memberId)); }
+function fitStatusOf(p){ return computeFitnessStatus(p, fitChecksOf(p.memberId), todayISO()); }
+function fitTodoCount(){ return state.patients.filter(p => { const s = fitStatusOf(p); return s && s.needsAction; }).length; }
+
+function renderKeepModalScroll(){
+  const sel = [".overlay", ".modal", ".modal-body"];
+  const tops = sel.map(s => { const e = document.querySelector(s); return e ? e.scrollTop : 0; });
+  render();
+  sel.forEach((s, i) => { const e = document.querySelector(s); if(e) e.scrollTop = tops[i]; });
+}
+
+function renderFitnessSection(p){
+  const isPt = p.ptMember === true || String(p.ptMember).toUpperCase() === "TRUE";
+  let html = `<div class="fit-box">
+    <label style="font-weight:700; display:flex; gap:8px; align-items:center;"><input type="checkbox" id="ptMemberChk" ${isPt?"checked":""}> パーソナルトレーニング会員（体力測定チェック対象）</label>`;
+  if(!isPt) return html + `</div>`;
+  const checks = fitChecksOf(p.memberId).slice().sort((a,b) => (b.date||"").localeCompare(a.date||""));
+  const st = fitStatusOf(p);
+  if(!state.draftFitDate) state.draftFitDate = todayISO();
+  html += `<div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end;">
+      <div><label class="field-label">入会日</label><input type="date" id="ptStartDate" value="${escapeHtml(p.ptStartDate||"")}"></div>
+      <div><span class="fit-badge ${st.level}">${escapeHtml(st.label)}</span></div>
+    </div>
+    <div class="helptext">${escapeHtml(st.detail)}</div>`;
+  if(p.ptStartDate){
+    html += `<table><thead><tr><th>項目</th><th>状況</th></tr></thead><tbody>
+      <tr><td>初回（入会から1か月以内：${escapeHtml(st.deadline)}まで）</td><td class="${st.initialDone?"done":"miss"}">${st.initialDone?"○ 実施済":"× 未実施"}</td></tr>
+      ${st.periods.map(x => `<tr><td>${escapeHtml(x.label)}（定期）</td><td class="${x.done?"done":"miss"}">${x.done?"○ 実施済":"× 未実施"}</td></tr>`).join("")}
+    </tbody></table>`;
+  }
+  html += `<div style="margin-top:10px;"><label class="field-label">実施記録（${checks.length}件）</label>
+    ${checks.length===0 ? `<div class="helptext">まだ記録がありません</div>` : checks.map(c => `<div style="display:flex; gap:10px; align-items:center; padding:3px 0;"><span>${escapeHtml(fmtDate(c.date))}</span><span class="helptext" style="margin:0;">${escapeHtml(c.recordedBy||"")}</span><button class="btn sm danger delFit" data-id="${escapeHtml(c.checkId)}" style="margin-left:auto;">削除</button></div>`).join("")}
+    </div>
+    <div class="fit-add">
+      <div><label class="field-label">実施日</label><input type="date" id="fitDate" value="${escapeHtml(state.draftFitDate)}"></div>
+      <div><label class="field-label">記載者</label><select class="field" id="fitRecorderSelect"><option value="" ${!state.selectedRecorderId?"selected":""}>-- 選択してください --</option>${state.recorders.map(s => `<option value="${escapeHtml(s.recorderId)}" ${state.selectedRecorderId===s.recorderId?"selected":""}>${escapeHtml(s.name)}</option>`).join("")}</select></div>
+      <button class="btn primary" id="addFitBtn">実施日を記録</button>
+    </div></div>`;
+  return html;
+}
+
+async function savePtFields(changes){
+  const p = state.patients.find(x => x.memberId === state.openPatientId);
+  if(!p) return;
+  const updated = { ...p, name: state.draftPatientName.trim(), birthdate: state.draftPatientBirthdate,
+    store: state.draftPatientStore, notice: state.draftNotice, ...changes };
+  setPatientSaveStatus("保存中...");
+  const res = await apiPost("savePatient", updated);
+  if(res.ok){
+    Object.assign(p, updated);
+    setPatientSaveStatus("自動保存済み ✓");
+    renderKeepModalScroll();
+  }else{
+    alert("保存に失敗しました：" + (res.error||""));
+    renderKeepModalScroll();
+  }
+}
+
+async function addFitnessCheck(){
+  if(state.fitBusy) return;
+  const p = state.patients.find(x => x.memberId === state.openPatientId);
+  if(!p) return;
+  const date = state.draftFitDate;
+  if(!date){ alert("実施日を入力してください"); return; }
+  if(!state.selectedRecorderId){ alert("記載者を選択してください"); return; }
+  if(fitChecksOf(p.memberId).some(c => c.date === date)){ alert("その日付は既に記録されています"); return; }
+  state.fitBusy = true;
+  const checkId = uid("fit");
+  const res = await apiPost("saveFitnessCheck", { checkId, memberId: p.memberId, date, recordedByRecorderId: state.selectedRecorderId });
+  state.fitBusy = false;
+  if(!res.ok){ alert("記録に失敗しました：" + (res.error||"")); return; }
+  const rec = state.recorders.find(r => r.recorderId === state.selectedRecorderId);
+  state.fitnessChecks.push({ checkId, memberId: p.memberId, date, recordedBy: rec ? rec.name : "" });
+  renderKeepModalScroll();
+}
+
+async function deleteFitnessCheck(checkId){
+  if(state.fitBusy) return;
+  const c = state.fitnessChecks.find(x => x.checkId === checkId);
+  if(!c) return;
+  if(!confirm(`${fmtDate(c.date)} の実施記録を削除します。よろしいですか？`)) return;
+  state.fitBusy = true;
+  const res = await apiPost("deleteFitnessCheck", { checkId });
+  state.fitBusy = false;
+  if(!res.ok){ alert("削除に失敗しました：" + (res.error||"")); return; }
+  state.fitnessChecks = state.fitnessChecks.filter(x => x.checkId !== checkId);
+  renderKeepModalScroll();
 }
 
 function renderMain(){
@@ -608,16 +788,18 @@ function renderPatientListInner(shown){
   return `
       <div style="overflow-x:auto;">
       <table class="plist">
-        <thead><tr><th>ID</th><th>名前</th><th>年齢</th><th>生年月日</th><th>店舗</th></tr></thead>
+        <thead><tr><th>ID</th><th>名前</th><th>年齢</th><th>生年月日</th><th>店舗</th><th>体力測定</th></tr></thead>
         <tbody>
           ${shown.map(p => {
             const age = calcAge(p.birthdate);
+            const fs = fitStatusOf(p);
             return `<tr class="prow" data-id="${escapeHtml(p.memberId)}">
               <td><span class="pid-badge">${escapeHtml(p.memberId)}</span></td>
-              <td>${escapeHtml(p.name)||"（名前未登録）"}</td>
+              <td>${escapeHtml(p.name)||"（名前未登録）"}${p.planDue ? ` <span class="fit-badge warn">\u{1f4cb} 計画書</span>` : ""}</td>
               <td>${age!==null?`<span class="age-badge">${age}</span>歳`:"\u2014"}</td>
               <td>${fmtDate(p.birthdate)}</td>
               <td><span class="store-tag">${escapeHtml(p.store||"\u2014")}</span></td>
+              <td>${fs ? `<span class="fit-badge ${fs.level}">${escapeHtml(fs.label)}</span>` : "\u2014"}</td>
             </tr>`;
           }).join("")}
         </tbody>
@@ -637,6 +819,12 @@ function renderPatientsTab(){
       <div class="section-title"><span class="bar"></span>患者一覧</div>
       <div class="list-toolbar">
         <input type="text" id="searchInput" placeholder="名前 または ID で検索" value="${escapeHtml(state.search)}">
+        <select class="field" id="fitFilter" style="width:auto;">
+          <option value="all" ${state.fitFilter==="all"?"selected":""}>絞り込み：すべて</option>
+          <option value="plan" ${state.fitFilter==="plan"?"selected":""}>計画書お渡し待ち（${state.patients.filter(x=>x.planDue).length}名）</option>
+          <option value="todo" ${state.fitFilter==="todo"?"selected":""}>体力測定 要対応のみ（${fitTodoCount()}名）</option>
+          <option value="pt" ${state.fitFilter==="pt"?"selected":""}>PT会員のみ</option>
+        </select>
         <span class="count-pill" id="countPill">${countPillText(list)}</span>
         <button class="btn primary" id="newPatientBtn" style="margin-left:auto;">＋ 新規患者を追加</button>
       </div>
@@ -750,6 +938,7 @@ function renderPatientModal(){
         <button class="x" id="closePatient">\u2715</button>
       </div>
       <div class="modal-body">
+        ${renderPlanBanner(p)}
         ${p.notice && p.notice.trim() ? `<div class="notice-preview">\u26a0 ${escapeHtml(p.notice)}</div>` : ""}
         ${renderPatientEditFields(p, age)}
 
@@ -784,6 +973,8 @@ function renderPatientEditFields(p, age){
         <label class="field-label">この患者への伝達事項・注意事項（他スタッフ向け）</label>
         <textarea id="editNotice" rows="3" placeholder="例）膝の術後のため、うつ伏せ施術は避けてください">${escapeHtml(state.draftNotice)}</textarea>
       </div>
+
+      ${renderFitnessSection(p)}
     </div>
   </div>`;
 }
@@ -817,12 +1008,16 @@ function renderNewEntryForm(p){
       <textarea id="entryText" rows="7" placeholder="施術内容・所見などを入力">${escapeHtml(state.draftText)}</textarea>
     </div>
 
+    ${state.draftServices.includes("初回") ? renderAttachSlots() : ""}
+
     <div style="margin-top:14px;">
-      <label class="field-label">写真</label>
+      <label class="field-label">写真${state.draftServices.includes("初回") ? "（その他）" : ""}</label>
       <div class="img-strip" id="imgStrip">
-        ${state.draftImages.map((src,i) => `
-          <div class="img-thumb"><img src="${src}" data-idx="${i}" class="thumbImg"><button class="rm" data-idx="${i}">\u2715</button></div>
-        `).join("")}
+        ${state.draftImages.map((src,i) => {
+          const lb = state.draftImageLabels[i] || "";
+          if(lb && ATTACH_SLOTS.includes(lb) && state.draftServices.includes("初回")) return "";
+          return `<div class="img-thumb"><img src="${src}" data-idx="${i}" class="thumbImg"><button class="rm" data-idx="${i}">\u2715</button>${lb?`<div class="helptext" style="text-align:center;margin:0;">${escapeHtml(lb)}</div>`:""}</div>`;
+        }).join("")}
         <label class="img-add">\u{1f4f7}<br>撮影<input type="file" accept="image/*" capture="environment" id="captureInput" style="display:none;"></label>
         <label class="img-add">\u{1f5bc}<br>選択<input type="file" accept="image/*" multiple id="galleryInput" style="display:none;"></label>
       </div>
@@ -831,6 +1026,47 @@ function renderNewEntryForm(p){
     <div style="margin-top:18px; display:flex; gap:8px; align-items:center;">
       <button class="btn primary" id="saveEntryBtn" ${state.savingKarte ? "disabled" : ""}>${state.savingKarte ? "保存中です…（写真がある場合は時間がかかります）" : (state.editingEntryId ? "この内容で更新する" : "カルテを保存する")}</button>
       ${state.editingEntryId && !state.savingKarte ? `<button class="btn" id="cancelEditBtn">編集をキャンセル</button>` : ""}
+    </div>
+  </div>`;
+}
+
+function renderAttachSlots(){
+  return `<div class="fit-box" style="margin-top:14px;">
+    <label class="field-label" style="margin-top:0;">初回の添付書類（5点）</label>
+    <div class="helptext">未添付のまま保存しようとすると確認メッセージが出ます。</div>
+    ${ATTACH_SLOTS.map((name, si) => {
+      const idxs = state.draftImages.map((_, i) => i).filter(i => state.draftImageLabels[i] === name);
+      return `<div style="margin-top:10px;">
+        <div style="display:flex; gap:8px; align-items:center;"><span class="fit-badge ${idxs.length?"ok":"warn"}">${idxs.length?"○ 添付済":"未添付"}</span><b style="font-size:0.9rem;">${escapeHtml(name)}</b></div>
+        <div class="img-strip">
+          ${idxs.map(i => `<div class="img-thumb"><img src="${state.draftImages[i]}" class="thumbImg"><button class="rm" data-idx="${i}">\u2715</button></div>`).join("")}
+          <label class="img-add">\u{1f4f7}<br>撮影<input type="file" accept="image/*" capture="environment" class="slotInput" data-label="${escapeHtml(name)}" style="display:none;"></label>
+          <label class="img-add">\u{1f5bc}<br>選択<input type="file" accept="image/*" multiple class="slotInput" data-label="${escapeHtml(name)}" style="display:none;"></label>
+        </div>
+      </div>`;
+    }).join("")}
+  </div>`;
+}
+
+function renderPlanBanner(p){
+  if(!p.planDue) return "";
+  return `<div style="background:#fff1cf; border:2px solid #e0a800; border-radius:10px; padding:12px 14px; margin-bottom:14px; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+    <span style="font-weight:800; color:#8a5a00; font-size:1.02rem;">\u{1f4cb} 次回、計画書お渡しです</span>
+    <span class="helptext" style="margin:0;">2回目のカルテを保存すると、この表示は消えます。</span>
+    <button class="btn sm" id="clearPlanBtn" style="margin-left:auto;">お渡し済み（表示を消す）</button>
+  </div>`;
+}
+
+function renderConfirmSave(){
+  if(!state.confirmSave) return "";
+  return `<div class="overlay" style="z-index:300; align-items:center;">
+    <div class="card" style="max-width:420px; width:100%; padding:22px;">
+      <div style="font-weight:800; margin-bottom:8px;">確認</div>
+      <div style="white-space:pre-wrap; line-height:1.7;">${escapeHtml(state.confirmSave)}</div>
+      <div style="display:flex; gap:10px; margin-top:18px; justify-content:flex-end;">
+        <button class="btn" id="confirmSaveCancel">キャンセル</button>
+        <button class="btn primary" id="confirmSaveOk">保存</button>
+      </div>
     </div>
   </div>`;
 }
@@ -850,7 +1086,7 @@ function renderKarteHistory(entries){
         </div>
       </div>
       <div class="entry-text">${escapeHtml(e.text)}</div>
-      ${(e.images && e.images.length) ? `<div class="img-strip">${e.images.map(src => `<div class="img-thumb"><img src="${src}" class="histImg"></div>`).join("")}</div>` : ""}
+      ${(e.images && e.images.length) ? `<div class="img-strip">${e.images.map((src, i) => `<div class="img-thumb"><img src="${src}" class="histImg">${(e.imageLabels && e.imageLabels[i]) ? `<div class="helptext" style="text-align:center;margin:0;">${escapeHtml(e.imageLabels[i])}</div>` : ""}</div>`).join("")}</div>` : ""}
     </div>
   `).join("");
 }
@@ -920,6 +1156,29 @@ function bindEvents(){
   if(editBirthdate) editBirthdate.onchange = (e) => { state.draftPatientBirthdate = e.target.value; autoSavePatient(); };
   const editStore = $("#editStore");
   if(editStore) editStore.onchange = (e) => { state.draftPatientStore = e.target.value; autoSavePatient(); };
+  $$(".slotInput").forEach(inp => inp.onchange = (e) => handleImageFiles(e.target.files, inp.dataset.label));
+  const clearPlanBtn = $("#clearPlanBtn");
+  if(clearPlanBtn) clearPlanBtn.onclick = clearPlanDue;
+  const csCancel = $("#confirmSaveCancel");
+  if(csCancel) csCancel.onclick = () => { state.confirmSave = null; render(); };
+  const csOk = $("#confirmSaveOk");
+  if(csOk) csOk.onclick = () => { state.confirmSave = null; render(); saveKarteEntry(true); };
+  const fitFilter = $("#fitFilter");
+  if(fitFilter) fitFilter.onchange = (e) => { state.fitFilter = e.target.value; updatePatientListInline(); };
+  const ptMemberChk = $("#ptMemberChk");
+  if(ptMemberChk) ptMemberChk.onchange = (e) => savePtFields({ ptMember: e.target.checked });
+  const ptStartDate = $("#ptStartDate");
+  if(ptStartDate) ptStartDate.onchange = (e) => savePtFields({ ptStartDate: e.target.value });
+  const fitDate = $("#fitDate");
+  if(fitDate) fitDate.oninput = (e) => { state.draftFitDate = e.target.value; };
+  const fitRecorderSelect = $("#fitRecorderSelect");
+  if(fitRecorderSelect) fitRecorderSelect.onchange = (e) => {
+    state.selectedRecorderId = e.target.value;
+    try{ localStorage.setItem("jump_karte_recorder_id", e.target.value); }catch(err){}
+  };
+  const addFitBtn = $("#addFitBtn");
+  if(addFitBtn) addFitBtn.onclick = addFitnessCheck;
+  $$(".delFit").forEach(btn => btn.onclick = () => deleteFitnessCheck(btn.dataset.id));
   const editNotice = $("#editNotice");
   if(editNotice) editNotice.oninput = (e) => { state.draftNotice = e.target.value; scheduleAutoSavePatient(); };
 
@@ -965,6 +1224,7 @@ function bindEvents(){
   $$(".rm").forEach(btn => btn.onclick = () => {
     const idx = parseInt(btn.dataset.idx,10);
     state.draftImages.splice(idx,1);
+    state.draftImageLabels.splice(idx,1);
     render();
   });
   $$(".thumbImg, .histImg").forEach(img => img.onclick = () => { state.lightboxSrc = img.src; render(); });
@@ -1008,7 +1268,7 @@ async function createNewPatient(){
     return;
   }
   const storeName = state.currentStore === "ALL" ? (state.stores[0]?.name || "本店") : (state.stores.find(s=>s.storeId===state.currentStore)?.name || "本店");
-  const patient = { memberId, name: name.trim(), birthdate:"", store: storeName, notice:"", createdAt: new Date().toISOString() };
+  const patient = { memberId, name: name.trim(), birthdate:"", store: storeName, notice:"", ptMember:false, ptStartDate:"", planDue:false, createdAt: new Date().toISOString() };
 
   state.busy = true; render();
   const res = await apiPost("savePatient", patient);
@@ -1046,6 +1306,7 @@ function resetDraft(){
   state.draftFreeService = "";
   state.draftText = "";
   state.draftImages = [];
+  state.draftImageLabels = [];
   state.draftDate = todayISO();
   state.editingEntryId = null;
   state.draftEntryId = null;
@@ -1101,6 +1362,7 @@ async function deleteCurrentPatient(){
   if(!res.ok){ alert("削除に失敗しました：" + (res.error||"")); render(); return; }
   state.patients = state.patients.filter(x => x.memberId !== p.memberId);
   delete state.karteCache[p.memberId];
+  state.fitnessChecks = state.fitnessChecks.filter(c => c.memberId !== p.memberId);
   closePatientModal();
 }
 
@@ -1130,28 +1392,38 @@ async function changeCurrentPatientMemberId(){
     state.karteCache[newId] = state.karteCache[oldId].map(e => ({...e, memberId: newId}));
     delete state.karteCache[oldId];
   }
+  state.fitnessChecks.forEach(c => { if(c.memberId === oldId) c.memberId = newId; });
   state.openPatientId = newId;
   render();
 }
 
-async function handleImageFiles(fileList){
+async function handleImageFiles(fileList, label){
   const files = Array.from(fileList || []);
   for(const f of files){
     try{
       const dataUrl = await compressImage(f);
       state.draftImages.push(dataUrl);
+      state.draftImageLabels.push(label || "");
     }catch(err){ console.error(err); }
   }
   render();
 }
 
-async function saveKarteEntry(){
+async function saveKarteEntry(force){
   if(state.savingKarte) return; // 二重送信の防止
   const p = state.patients.find(x => x.memberId === state.openPatientId);
   if(!p) return;
   if(!state.selectedRecorderId){
     alert("「記載者」を選択してから保存してください。");
     return;
+  }
+  if(force !== true && state.draftServices.includes("初回")){
+    const missing = ATTACH_SLOTS.filter(n => !state.draftImages.some((_, i) => state.draftImageLabels[i] === n));
+    if(missing.length){
+      state.confirmSave = missing.map(n => n + "が保存されていません。").join("\n") + "\n保存を実行しますか？";
+      render();
+      return;
+    }
   }
   const date = document.getElementById("entryDate").value || todayISO();
   const text = document.getElementById("entryText").value;
@@ -1170,6 +1442,7 @@ async function saveKarteEntry(){
     memberId: p.memberId,
     date, services: state.draftServices.slice(), freeService, text,
     images: state.draftImages.slice(),
+    imageLabels: state.draftImageLabels.slice(),
     recordedByRecorderId: state.selectedRecorderId || null,
   };
 
@@ -1183,6 +1456,7 @@ async function saveKarteEntry(){
   }
 
   state.draftEntryId = null;
+  if(typeof res.planDue === "boolean") p.planDue = res.planDue;
   const entries = await getKarteForce(p.memberId);
   state.karteCache[p.memberId] = entries;
   resetDraft();
@@ -1204,6 +1478,7 @@ function startEditEntry(entryId){
   state.draftFreeService = e.freeService || "";
   state.draftText = e.text || "";
   state.draftImages = (e.images||[]).slice();
+  state.draftImageLabels = state.draftImages.map((_, i) => (e.imageLabels && e.imageLabels[i]) || "");
   state.draftDate = e.date;
   state.patientSubtab = "new";
   render();
@@ -1217,7 +1492,18 @@ async function deleteEntry(entryId){
   state.busy = false;
   if(!res.ok){ alert("削除に失敗しました：" + (res.error||"")); render(); return; }
   state.karteCache[pid] = (state.karteCache[pid]||[]).filter(e => e.entryId !== entryId);
+  if(res.planDue === false){ const pp = state.patients.find(x => x.memberId === pid); if(pp) pp.planDue = false; }
   render();
+}
+
+async function clearPlanDue(){
+  const p = state.patients.find(x => x.memberId === state.openPatientId);
+  if(!p) return;
+  if(!confirm("「次回、計画書お渡しです」の表示を消します。よろしいですか？")) return;
+  const res = await apiPost("clearPlanDue", { memberId: p.memberId });
+  if(!res.ok){ alert("失敗しました：" + (res.error||"")); return; }
+  p.planDue = false;
+  renderKeepModalScroll();
 }
 
 /* templates */

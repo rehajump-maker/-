@@ -278,6 +278,8 @@
 const API_URL = "https://script.google.com/macros/s/AKfycbwFC16qSarNPEoPsNTp0VMV7n0uZcF7HAED-2UuYBCkD3Aa2wqSzbAJOo6o53_I3ouY/exec";
 
 const ATTACH_SLOTS = ["問診票","同意書","検査用紙１","検査用紙２","記載カルテ"]; // 「初回」で添付を確認する書類
+const PT_SERVICES = ["パーソナルトレーニング30分","パーソナルトレーニング50分"];
+const VITALS_LINE = "血圧 ～/～mmHg　脈拍 ～回/分";
 const SERVICE_OPTIONS = ["初回","整体30分","整体50分","パーソナルトレーニング30分","パーソナルトレーニング50分","ジム入会時説明"];
 
 const POSTURE_URL = "https://script.google.com/macros/s/AKfycbyeLBPXltoCYEU4RVKd-mdCVSbQBK-GozM7QHk9CZBOw1y2chwaNNLlCTGsUNMjBG0pZQ/exec";
@@ -435,6 +437,8 @@ function computeFitnessStatus(p, checks, todayStr){
 const state = {
   fitnessChecks: [],
   draftImageLabels: [],
+  draftNoticeDirty: false,
+  focusVitals: false,
   confirmSave: null,
   fitFilter: "all",
   draftFitDate: "",
@@ -724,10 +728,10 @@ function renderFitnessSection(p){
 async function savePtFields(changes){
   const p = state.patients.find(x => x.memberId === state.openPatientId);
   if(!p) return;
-  const updated = { ...p, name: state.draftPatientName.trim(), birthdate: state.draftPatientBirthdate,
-    store: state.draftPatientStore, notice: state.draftNotice, ...changes };
+  // PT会員の情報だけを送る（注意事項など他の項目には触れない）
+  const updated = { ptMember: p.ptMember, ptStartDate: p.ptStartDate || "", ...changes };
   setPatientSaveStatus("保存中...");
-  const res = await apiPost("savePatient", updated);
+  const res = await apiPost("savePtInfo", { memberId: p.memberId, ptMember: updated.ptMember, ptStartDate: updated.ptStartDate });
   if(res.ok){
     Object.assign(p, updated);
     setPatientSaveStatus("自動保存済み ✓");
@@ -1005,6 +1009,7 @@ function renderNewEntryForm(p){
 
     <div style="margin-top:10px;">
       <label class="field-label">カルテ内容</label>
+      ${state.draftText.includes("～") ? `<div style="margin-bottom:6px;"><button class="btn sm" id="nextTildeBtn" type="button">次の「～」へ移動</button> <span class="helptext">「～」を選択した状態で数字を打つと置き換わります</span></div>` : ""}
       <textarea id="entryText" rows="7" placeholder="施術内容・所見などを入力">${escapeHtml(state.draftText)}</textarea>
     </div>
 
@@ -1028,6 +1033,17 @@ function renderNewEntryForm(p){
       ${state.editingEntryId && !state.savingKarte ? `<button class="btn" id="cancelEditBtn">編集をキャンセル</button>` : ""}
     </div>
   </div>`;
+}
+
+/* カルテ内容の中の「～」を順に選択する（数字を上書き入力しやすくする） */
+function selectNextTilde(fromStart){
+  const ta = document.getElementById("entryText");
+  if(!ta) return;
+  let i = ta.value.indexOf("～", fromStart ? 0 : ta.selectionEnd);
+  if(i < 0) i = ta.value.indexOf("～", 0);
+  if(i < 0) return;
+  ta.focus();
+  ta.setSelectionRange(i, i + 1);
 }
 
 function renderAttachSlots(){
@@ -1157,6 +1173,9 @@ function bindEvents(){
   const editStore = $("#editStore");
   if(editStore) editStore.onchange = (e) => { state.draftPatientStore = e.target.value; autoSavePatient(); };
   $$(".slotInput").forEach(inp => inp.onchange = (e) => handleImageFiles(e.target.files, inp.dataset.label));
+  const nextTildeBtn = $("#nextTildeBtn");
+  if(nextTildeBtn) nextTildeBtn.onclick = () => selectNextTilde();
+  if(state.focusVitals){ state.focusVitals = false; selectNextTilde(true); }
   const clearPlanBtn = $("#clearPlanBtn");
   if(clearPlanBtn) clearPlanBtn.onclick = clearPlanDue;
   const csCancel = $("#confirmSaveCancel");
@@ -1180,7 +1199,7 @@ function bindEvents(){
   if(addFitBtn) addFitBtn.onclick = addFitnessCheck;
   $$(".delFit").forEach(btn => btn.onclick = () => deleteFitnessCheck(btn.dataset.id));
   const editNotice = $("#editNotice");
-  if(editNotice) editNotice.oninput = (e) => { state.draftNotice = e.target.value; scheduleAutoSavePatient(); };
+  if(editNotice) editNotice.oninput = (e) => { state.draftNotice = e.target.value; state.draftNoticeDirty = true; scheduleAutoSavePatient(); };
 
   $$(".subtab").forEach(b => b.onclick = () => { state.patientSubtab = b.dataset.subtab; render(); });
 
@@ -1188,6 +1207,15 @@ function bindEvents(){
     const svc = chip.dataset.svc;
     const idx = state.draftServices.indexOf(svc);
     if(idx >= 0) state.draftServices.splice(idx,1); else state.draftServices.push(svc);
+    // パーソナルトレーニングを選んだら、その日のバイタル記入欄をカルテ内容の先頭に入れる
+    if(idx < 0 && PT_SERVICES.includes(svc) && !state.editingEntryId){
+      const cur = document.getElementById("entryText");
+      const t = cur ? cur.value : state.draftText;
+      if(!t.includes("血圧")){
+        state.draftText = VITALS_LINE + (t ? "\n" + t : "");
+        state.focusVitals = true;
+      }
+    }
     render();
   });
 
@@ -1289,6 +1317,7 @@ async function openPatient(id){
   state.draftPatientBirthdate = p ? (p.birthdate || "") : "";
   state.draftPatientStore = p ? (p.store || "") : "";
   state.draftNotice = p ? (p.notice || "") : "";
+  state.draftNoticeDirty = false;
   render();
   await getKarte(id);
   render();
@@ -1342,10 +1371,14 @@ async function autoSavePatient(){
     store: state.draftPatientStore,
     notice: state.draftNotice,
   };
+  // 注意事項は、この画面で実際に編集したときだけ送る（未編集なら上書きしない）
+  const noticeWasEdited = state.draftNoticeDirty;
+  if(!noticeWasEdited) delete updated.notice;
   setPatientSaveStatus("保存中...");
   const res = await apiPost("savePatient", updated);
   if(res.ok){
     Object.assign(p, updated);
+    if(noticeWasEdited && state.draftNotice === updated.notice) state.draftNoticeDirty = false;
     setPatientSaveStatus("自動保存済み \u2713");
   }else{
     setPatientSaveStatus("保存に失敗しました");

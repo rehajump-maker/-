@@ -1185,7 +1185,13 @@ function bindEvents(){
   const fitFilter = $("#fitFilter");
   if(fitFilter) fitFilter.onchange = (e) => { state.fitFilter = e.target.value; updatePatientListInline(); };
   const ptMemberChk = $("#ptMemberChk");
-  if(ptMemberChk) ptMemberChk.onchange = (e) => savePtFields({ ptMember: e.target.checked });
+  if(ptMemberChk) ptMemberChk.onchange = (e) => {
+    const cur = state.patients.find(x => x.memberId === state.openPatientId);
+    const ch = { ptMember: e.target.checked };
+    // チェックを入れた日を入会日にする（入会日が未入力のときだけ。あとから変更可）
+    if(e.target.checked && cur && !cur.ptStartDate) ch.ptStartDate = todayISO();
+    savePtFields(ch);
+  };
   const ptStartDate = $("#ptStartDate");
   if(ptStartDate) ptStartDate.onchange = (e) => savePtFields({ ptStartDate: e.target.value });
   const fitDate = $("#fitDate");

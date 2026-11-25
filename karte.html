@@ -437,6 +437,8 @@ function computeFitnessStatus(p, checks, todayStr){
 const state = {
   fitnessChecks: [],
   draftImageLabels: [],
+  notices: [], noticeStaff: [], noticeOpen: false, noticeTab: "inbox", noticeForm: null,
+  noticeLoading: false, noticeError: "", noticeBusy: false,
   draftNoticeDirty: false,
   focusVitals: false,
   confirmSave: null,
@@ -485,12 +487,6 @@ async function loadAll(){
     state.templates = data.templates || [];
     state.stores = data.stores || [];
     state.recorders = data.recorders || [];
-    if(!state.selectedRecorderId){
-      const saved = localStorage.getItem("jump_karte_recorder_id");
-      if(saved && state.recorders.some(s => s.recorderId === saved)) state.selectedRecorderId = saved;
-      // 保存履歴が無い場合は自動選択しない（未選択のまま。誤って別人の名前で
-      // 記録されるのを防ぐため、保存時に明示的な選択を必須にしている）
-    }
     state.loaded = true;
   }catch(e){
     state.loadError = String(e);
@@ -546,6 +542,7 @@ function render(){
     ${state.openPatientId ? renderPatientModal() : ""}
     ${state.lightboxSrc ? renderLightbox() : ""}
     ${state.busy ? renderBusyOverlay() : ""}
+    ${renderNoticeModal()}
     ${renderConfirmSave()}
   `;
   bindEvents();
@@ -596,8 +593,9 @@ function bindLoginEvents(){
           state.auth = { token: data.token, name: data.name, role: data.role, staffId: data.staffId };
           saveAuth(state.auth);
           state.loaded = false;
+          state.noticeOpen = true; state.noticeTab = "inbox"; state.noticeForm = null; state.notices = [];
           render();
-          await loadAll();
+          await Promise.all([loadAll(), loadNotices()]);
           render();
         }else{
           state.loginError = data.error || "ログインに失敗しました";
@@ -655,13 +653,13 @@ function renderTopbar(){
       <button class="tab-btn ${state.tab==='patients'?'active':''}" data-tab="patients">患者一覧</button>
       <button class="tab-btn ${state.tab==='templates'?'active':''}" data-tab="templates">見本テキスト管理</button>
       <button class="tab-btn ${state.tab==='stores'?'active':''}" data-tab="stores">店舗管理</button>
-      ${state.auth && state.auth.role === "admin" ? `<button class="tab-btn ${state.tab==='recorders'?'active':''}" data-tab="recorders">記載者管理</button>` : ""}
     </div>
     <div class="tabs">
       <a class="tab-btn" href="${POSTURE_URL}" target="_blank" rel="noopener">姿勢分析を開く</a>
       <a class="tab-btn" href="${MEASURE_URL}" target="_blank" rel="noopener">体力測定を開く</a>
     </div>
     <div class="tabs" style="align-items:center;">
+      <button class="tab-btn" id="openNoticesBtn">📢 連絡事項${noticeUncheckedCount()>0?`（未確認${noticeUncheckedCount()}）`:""}</button>
       <span style="color:#CBDAD5; font-size:0.82rem;">${escapeHtml(state.auth.name)}さん</span>
       <button class="tab-btn" id="logoutBtn">ログアウト</button>
     </div>
@@ -719,7 +717,6 @@ function renderFitnessSection(p){
     </div>
     <div class="fit-add">
       <div><label class="field-label">実施日</label><input type="date" id="fitDate" value="${escapeHtml(state.draftFitDate)}"></div>
-      <div><label class="field-label">記載者</label><select class="field" id="fitRecorderSelect"><option value="" ${!state.selectedRecorderId?"selected":""}>-- 選択してください --</option>${state.recorders.map(s => `<option value="${escapeHtml(s.recorderId)}" ${state.selectedRecorderId===s.recorderId?"selected":""}>${escapeHtml(s.name)}</option>`).join("")}</select></div>
       <button class="btn primary" id="addFitBtn">実施日を記録</button>
     </div></div>`;
   return html;
@@ -748,15 +745,13 @@ async function addFitnessCheck(){
   if(!p) return;
   const date = state.draftFitDate;
   if(!date){ alert("実施日を入力してください"); return; }
-  if(!state.selectedRecorderId){ alert("記載者を選択してください"); return; }
   if(fitChecksOf(p.memberId).some(c => c.date === date)){ alert("その日付は既に記録されています"); return; }
   state.fitBusy = true;
   const checkId = uid("fit");
-  const res = await apiPost("saveFitnessCheck", { checkId, memberId: p.memberId, date, recordedByRecorderId: state.selectedRecorderId });
+  const res = await apiPost("saveFitnessCheck", { checkId, memberId: p.memberId, date });
   state.fitBusy = false;
   if(!res.ok){ alert("記録に失敗しました：" + (res.error||"")); return; }
-  const rec = state.recorders.find(r => r.recorderId === state.selectedRecorderId);
-  state.fitnessChecks.push({ checkId, memberId: p.memberId, date, recordedBy: rec ? rec.name : "" });
+  state.fitnessChecks.push({ checkId, memberId: p.memberId, date, recordedBy: state.auth ? state.auth.name : "" });
   renderKeepModalScroll();
 }
 
@@ -783,7 +778,6 @@ function renderMain(){
   if(state.tab === "patients") return renderPatientsTab();
   if(state.tab === "templates") return renderTemplatesTab();
   if(state.tab === "stores") return renderStoresTab();
-  if(state.tab === "recorders") return renderRecordersTab();
   return "";
 }
 
@@ -891,26 +885,6 @@ function renderStoresTab(){
   `;
 }
 
-function renderRecordersTab(){
-  return `
-    <div class="card" style="padding:18px;">
-      <div class="section-title"><span class="bar"></span>記載者管理</div>
-      <p class="helptext">カルテ入力時の「記載者」プルダウンに表示される名前の一覧です。ログイン用のアカウントとは別に管理されます（管理者のみ編集できます）。</p>
-      <div id="recorderList">
-        ${state.recorders.map(r => `
-          <div class="store-list-item" data-id="${escapeHtml(r.recorderId)}">
-            <div class="tbody"><b>${escapeHtml(r.name)}</b></div>
-            <button class="btn sm danger delRecorder">削除</button>
-          </div>`).join("")}
-      </div>
-      <div class="row" style="margin-top:14px;">
-        <div><label class="field-label">新しい記載者名</label><input type="text" id="newRecorderName" placeholder="例）田中"></div>
-      </div>
-      <div style="margin-top:10px;"><button class="btn amber" id="addRecorderBtn">記載者を追加</button></div>
-    </div>
-  `;
-}
-
 function renderLightbox(){
   return `<div class="lightbox" id="lightboxOverlay"><button class="x" id="closeLightbox">\u2715</button><img src="${state.lightboxSrc}"></div>`;
 }
@@ -989,7 +963,6 @@ function renderNewEntryForm(p){
   <div>
     <div class="row">
       <div><label class="field-label">施術日</label><input type="date" id="entryDate" value="${state.draftDate || todayISO()}"></div>
-      <div><label class="field-label">記載者</label><select class="field" id="recorderSelect"><option value="" ${!state.selectedRecorderId?"selected":""}>-- 選択してください --</option>${state.recorders.map(s => `<option value="${escapeHtml(s.recorderId)}" ${state.selectedRecorderId===s.recorderId?"selected":""}>${escapeHtml(s.name)}</option>`).join("")}</select></div>
     </div>
     <div style="margin-top:14px;">
       <label class="field-label">本日のサービス内容（複数選択可）</label>
@@ -1151,10 +1124,6 @@ function bindEvents(){
   if(addStoreBtn) addStoreBtn.onclick = addStore;
   $$(".delStore").forEach(btn => btn.onclick = (e) => deleteStore(e.target.closest(".store-list-item").dataset.id));
 
-  const addRecorderBtn = $("#addRecorderBtn");
-  if(addRecorderBtn) addRecorderBtn.onclick = addRecorder;
-  $$(".delRecorder").forEach(btn => btn.onclick = (e) => deleteRecorder(e.target.closest(".store-list-item").dataset.id));
-
   const closePatient = $("#closePatient");
   if(closePatient) closePatient.onclick = closePatientModal;
   const patientOverlay = $("#patientOverlay");
@@ -1173,6 +1142,7 @@ function bindEvents(){
   const editStore = $("#editStore");
   if(editStore) editStore.onchange = (e) => { state.draftPatientStore = e.target.value; autoSavePatient(); };
   $$(".slotInput").forEach(inp => inp.onchange = (e) => handleImageFiles(e.target.files, inp.dataset.label));
+  bindNoticeEvents();
   const nextTildeBtn = $("#nextTildeBtn");
   if(nextTildeBtn) nextTildeBtn.onclick = () => selectNextTilde();
   if(state.focusVitals){ state.focusVitals = false; selectNextTilde(true); }
@@ -1196,18 +1166,13 @@ function bindEvents(){
   if(ptStartDate) ptStartDate.onchange = (e) => savePtFields({ ptStartDate: e.target.value });
   const fitDate = $("#fitDate");
   if(fitDate) fitDate.oninput = (e) => { state.draftFitDate = e.target.value; };
-  const fitRecorderSelect = $("#fitRecorderSelect");
-  if(fitRecorderSelect) fitRecorderSelect.onchange = (e) => {
-    state.selectedRecorderId = e.target.value;
-    try{ localStorage.setItem("jump_karte_recorder_id", e.target.value); }catch(err){}
-  };
   const addFitBtn = $("#addFitBtn");
   if(addFitBtn) addFitBtn.onclick = addFitnessCheck;
   $$(".delFit").forEach(btn => btn.onclick = () => deleteFitnessCheck(btn.dataset.id));
   const editNotice = $("#editNotice");
   if(editNotice) editNotice.oninput = (e) => { state.draftNotice = e.target.value; state.draftNoticeDirty = true; scheduleAutoSavePatient(); };
 
-  $$(".subtab").forEach(b => b.onclick = () => { state.patientSubtab = b.dataset.subtab; render(); });
+  $$(".subtab[data-subtab]").forEach(b => b.onclick = () => { state.patientSubtab = b.dataset.subtab; render(); });
 
   $$(".chip").forEach(chip => chip.onclick = () => {
     const svc = chip.dataset.svc;
@@ -1244,11 +1209,6 @@ function bindEvents(){
   if(entryText) entryText.oninput = (e) => { state.draftText = e.target.value; };
   const entryDate = $("#entryDate");
   if(entryDate) entryDate.oninput = (e) => { state.draftDate = e.target.value; };
-  const recorderSelect = $("#recorderSelect");
-  if(recorderSelect) recorderSelect.onchange = (e) => {
-    state.selectedRecorderId = e.target.value;
-    try{ localStorage.setItem("jump_karte_recorder_id", e.target.value); }catch(err){}
-  };
 
   const captureInput = $("#captureInput");
   if(captureInput) captureInput.onchange = (e) => handleImageFiles(e.target.files);
@@ -1452,10 +1412,6 @@ async function saveKarteEntry(force){
   if(state.savingKarte) return; // 二重送信の防止
   const p = state.patients.find(x => x.memberId === state.openPatientId);
   if(!p) return;
-  if(!state.selectedRecorderId){
-    alert("「記載者」を選択してから保存してください。");
-    return;
-  }
   if(force !== true && state.draftServices.includes("初回")){
     const missing = ATTACH_SLOTS.filter(n => !state.draftImages.some((_, i) => state.draftImageLabels[i] === n));
     if(missing.length){
@@ -1482,7 +1438,6 @@ async function saveKarteEntry(force){
     date, services: state.draftServices.slice(), freeService, text,
     images: state.draftImages.slice(),
     imageLabels: state.draftImageLabels.slice(),
-    recordedByRecorderId: state.selectedRecorderId || null,
   };
 
   state.busy = true; state.savingKarte = true; render();
@@ -1606,29 +1561,204 @@ async function deleteStore(id){
   render();
 }
 
-async function addRecorder(){
-  const name = document.getElementById("newRecorderName").value.trim();
-  if(!name) return;
-  state.busy = true; render();
-  const res = await apiPost("saveRecorder", { name });
-  state.busy = false;
-  if(!res.ok){ alert("保存に失敗しました：" + (res.error||"")); render(); return; }
-  state.recorders.push({ recorderId: res.recorderId, name });
+/* ---------------- 連絡事項 ---------------- */
+function noticeUncheckedCount(){
+  return state.notices.filter(n => n.isRecipient && !n.mine.dismissed && n.requireCheck && !n.mine.checked).length;
+}
+async function loadNotices(){
+  state.noticeLoading = true;
+  try{
+    const d = await apiGet({ action: "notices" });
+    if(d.ok){ state.notices = d.notices || []; state.noticeStaff = d.staff || []; state.noticeError = ""; }
+    else state.noticeError = d.error || "連絡事項の読み込みに失敗しました";
+  }catch(e){ state.noticeError = String(e); }
+  state.noticeLoading = false;
+}
+function fmtDT(iso){
+  if(!iso) return "";
+  const d = new Date(iso);
+  if(isNaN(d.getTime())) return "";
+  const z = n => String(n).padStart(2,"0");
+  return `${d.getMonth()+1}/${d.getDate()} ${z(d.getHours())}:${z(d.getMinutes())}`;
+}
+function noticeDueBadge(n){
+  if(!n.dueDate) return "";
+  return n.dueDate < todayISO()
+    ? `<span class="fit-badge bad">期限切れ ${escapeHtml(fmtDate(n.dueDate))}</span>`
+    : `<span class="fit-badge warn">期限 ${escapeHtml(fmtDate(n.dueDate))}</span>`;
+}
+function noticeHead(n, withFrom){
+  return `<div class="ehead" style="flex-wrap:wrap;">
+    <span class="svc-tag ${n.scope==="all"?"":"free"}">${n.scope==="all"?"共通":"個別"}</span>
+    <b>${escapeHtml(n.title || "（件名なし）")}</b>
+    ${noticeDueBadge(n)}
+    <span class="helptext" style="margin:0;">${withFrom ? escapeHtml(n.createdByName||"") + "　" : ""}${escapeHtml(fmtDT(n.createdAt))}</span>
+  </div>`;
+}
+function renderNoticeInboxItem(n){
+  return `<div class="entry-card" data-id="${escapeHtml(n.noticeId)}">
+    ${noticeHead(n, true)}
+    <div class="entry-text">${escapeHtml(n.body)}</div>
+    <div style="display:flex; gap:10px; align-items:center; margin-top:8px; flex-wrap:wrap;">
+      ${n.requireCheck ? `<label style="font-weight:700; display:flex; gap:6px; align-items:center;"><input type="checkbox" class="noticeChk" data-id="${escapeHtml(n.noticeId)}" ${n.mine.checked?"checked":""}> 確認・実行しました${n.mine.checked ? `<span class="helptext" style="margin:0;">（${escapeHtml(fmtDT(n.mine.checkedAt))}）</span>` : ""}</label>` : ""}
+      <button class="btn sm danger noticeDismiss" data-id="${escapeHtml(n.noticeId)}" style="margin-left:auto;">削除</button>
+    </div>
+  </div>`;
+}
+function renderNoticeSentItem(n){
+  const rec = n.recipients || [];
+  const done = rec.filter(r => r.checked).length;
+  const targetName = n.scope === "staff" ? ((rec[0] && rec[0].name) || "") : "";
+  return `<div class="entry-card" data-id="${escapeHtml(n.noticeId)}">
+    ${noticeHead(n, state.auth && n.createdById !== String(state.auth.staffId))}
+    ${n.scope==="staff" ? `<div class="helptext">宛先：${escapeHtml(targetName)}</div>` : `<div class="helptext">宛先：全員</div>`}
+    <div class="entry-text">${escapeHtml(n.body)}</div>
+    ${n.requireCheck ? `<div style="margin-top:8px;">
+      <div class="helptext" style="margin:0 0 4px;">確認状況：${done}/${rec.length}名</div>
+      <div style="display:flex; flex-wrap:wrap; gap:6px;">
+        ${rec.map(r => `<span class="fit-badge ${r.checked?"ok":"warn"}">${r.checked?"○":"×"} ${escapeHtml(r.name)}${r.checked?`（${escapeHtml(fmtDT(r.checkedAt))}）`:""}${r.dismissed?" 削除済":""}</span>`).join("")}
+      </div></div>` : `<div class="helptext">確認チェックなし</div>`}
+    <div style="display:flex; gap:8px; margin-top:8px;">
+      <button class="btn sm noticeEdit" data-id="${escapeHtml(n.noticeId)}">編集</button>
+      <button class="btn sm danger noticeDelOwn" data-id="${escapeHtml(n.noticeId)}">削除</button>
+    </div>
+  </div>`;
+}
+function renderNoticeForm(){
+  const f = state.noticeForm;
+  const isEdit = state.notices.some(n => n.noticeId === f.noticeId);
+  return `<div class="fit-box" style="margin-bottom:14px;">
+    <div style="font-weight:800;">${isEdit ? "連絡事項を編集" : "新しい連絡事項"}</div>
+    <div style="margin-top:8px;"><label class="field-label">件名</label><input type="text" id="nfTitle" value="${escapeHtml(f.title)}"></div>
+    <div style="margin-top:8px;"><label class="field-label">内容</label><textarea id="nfBody" rows="4">${escapeHtml(f.body)}</textarea></div>
+    <div class="row" style="margin-top:8px;">
+      <div><label class="field-label">送り先</label>
+        <select class="field" id="nfScope">
+          <option value="all" ${f.scope==="all"?"selected":""}>共通連絡（全員）</option>
+          <option value="staff" ${f.scope==="staff"?"selected":""}>個別連絡（1名を選ぶ）</option>
+        </select></div>
+      ${f.scope==="staff" ? `<div><label class="field-label">宛先</label>
+        <select class="field" id="nfTarget"><option value="">-- 選択してください --</option>${state.noticeStaff.map(s => `<option value="${escapeHtml(s.staffId)}" ${f.targetStaffId===s.staffId?"selected":""}>${escapeHtml(s.name)}</option>`).join("")}</select></div>` : ""}
+      <div><label class="field-label">期限（任意）</label><input type="date" id="nfDue" value="${escapeHtml(f.dueDate)}"></div>
+    </div>
+    <label style="display:flex; gap:8px; align-items:center; margin-top:10px; font-weight:700;"><input type="checkbox" id="nfReq" ${f.requireCheck?"checked":""}> 受け取った人に「確認・実行した」チェックを求める</label>
+    <div style="margin-top:12px; display:flex; gap:8px;">
+      <button class="btn primary" id="nfSave" ${state.noticeBusy?"disabled":""}>${isEdit ? "更新する" : "送信する"}</button>
+      <button class="btn" id="nfCancel">キャンセル</button>
+    </div>
+  </div>`;
+}
+function renderNoticeModal(){
+  if(!state.noticeOpen || !state.auth) return "";
+  const isAdmin = state.auth.role === "admin";
+  const byNew = (a,b) => String(b.createdAt||"").localeCompare(String(a.createdAt||""));
+  const inbox = state.notices.filter(n => n.isRecipient && !n.mine.dismissed).sort(byNew);
+  const sent = state.notices.filter(n => n.canManage).sort(byNew);
+  const unchecked = noticeUncheckedCount();
+  let body;
+  if(state.noticeLoading && state.notices.length === 0) body = `<div class="empty">読み込み中...</div>`;
+  else if(state.noticeTab === "inbox") body = inbox.length ? inbox.map(renderNoticeInboxItem).join("") : `<div class="empty">連絡事項はありません</div>`;
+  else body = (state.noticeForm ? renderNoticeForm() : `<div style="margin-bottom:12px;"><button class="btn primary" id="newNoticeBtn">＋ 新しい連絡事項を作成</button></div>`)
+    + (sent.length ? sent.map(renderNoticeSentItem).join("") : `<div class="empty">${isAdmin ? "連絡事項はまだありません" : "送った連絡事項はありません"}</div>`);
+  return `<div class="overlay" id="noticeOverlay" style="z-index:150;">
+    <div class="modal">
+      <div class="modal-head">
+        <div><div style="font-size:1.05rem; font-weight:800;">📢 連絡事項</div>
+        <div style="font-size:0.78rem; color:#BFD3CC;">${escapeHtml(state.auth.name)}さん${unchecked>0 ? `　未確認 ${unchecked}件` : ""}</div></div>
+        <button class="x" id="closeNotices">✕</button>
+      </div>
+      <div class="modal-body">
+        ${state.noticeError ? `<div class="notice-preview">${escapeHtml(state.noticeError)}</div>` : ""}
+        <div class="subtabs">
+          <button class="subtab ${state.noticeTab==='inbox'?'active':''}" data-ntab="inbox">受信（${inbox.length}件）</button>
+          <button class="subtab ${state.noticeTab==='sent'?'active':''}" data-ntab="sent">${isAdmin ? "全ての連絡事項（管理）" : "送った連絡事項"}（${sent.length}件）</button>
+        </div>
+        ${body}
+        <div style="margin-top:16px;"><button class="btn" id="closeNotices2">閉じてカルテを開く</button></div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function bindNoticeEvents(){
+  const $ = (sel) => document.querySelector(sel);
+  const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+  const ob = $("#openNoticesBtn");
+  if(ob) ob.onclick = async () => { state.noticeOpen = true; state.noticeTab = "inbox"; state.noticeForm = null; render(); await loadNotices(); render(); };
+  const closeIt = () => { state.noticeOpen = false; state.noticeForm = null; render(); };
+  const c1 = $("#closeNotices"); if(c1) c1.onclick = closeIt;
+  const c2 = $("#closeNotices2"); if(c2) c2.onclick = closeIt;
+  $$("[data-ntab]").forEach(b => b.onclick = () => { state.noticeTab = b.dataset.ntab; state.noticeForm = null; render(); });
+  const nb = $("#newNoticeBtn");
+  if(nb) nb.onclick = () => { state.noticeForm = { noticeId: uid("notice"), scope:"all", targetStaffId:"", title:"", body:"", dueDate:"", requireCheck:false }; render(); };
+  $$(".noticeChk").forEach(el => el.onchange = () => toggleNoticeCheck(el.dataset.id, el.checked));
+  $$(".noticeDismiss").forEach(el => el.onclick = () => dismissNotice(el.dataset.id, false));
+  $$(".noticeEdit").forEach(el => el.onclick = () => {
+    const n = state.notices.find(x => x.noticeId === el.dataset.id); if(!n) return;
+    state.noticeForm = { noticeId:n.noticeId, scope:n.scope, targetStaffId:n.targetStaffId||"", title:n.title||"", body:n.body||"", dueDate:n.dueDate||"", requireCheck:!!n.requireCheck };
+    render();
+  });
+  $$(".noticeDelOwn").forEach(el => el.onclick = () => deleteOwnNotice(el.dataset.id));
+  const f = state.noticeForm;
+  if(f){
+    const t = $("#nfTitle"); if(t) t.oninput = e => { f.title = e.target.value; };
+    const b = $("#nfBody"); if(b) b.oninput = e => { f.body = e.target.value; };
+    const d = $("#nfDue"); if(d) d.onchange = e => { f.dueDate = e.target.value; };
+    const r = $("#nfReq"); if(r) r.onchange = e => { f.requireCheck = e.target.checked; };
+    const tg = $("#nfTarget"); if(tg) tg.onchange = e => { f.targetStaffId = e.target.value; };
+    const sc = $("#nfScope"); if(sc) sc.onchange = e => { f.scope = e.target.value; render(); };
+    const sv = $("#nfSave"); if(sv) sv.onclick = saveNoticeForm;
+    const cn = $("#nfCancel"); if(cn) cn.onclick = () => { state.noticeForm = null; render(); };
+  }
+}
+
+async function saveNoticeForm(){
+  const f = state.noticeForm;
+  if(!f || state.noticeBusy) return;
+  if(!f.title.trim() && !f.body.trim()){ alert("件名か内容を入力してください"); return; }
+  if(f.scope === "staff" && !f.targetStaffId){ alert("宛先のスタッフを選択してください"); return; }
+  state.noticeBusy = true;
+  const res = await apiPost("saveNotice", f);
+  state.noticeBusy = false;
+  if(!res.ok){ alert("送信に失敗しました：" + (res.error||"")); render(); return; }
+  state.noticeForm = null;
+  await loadNotices();
   render();
 }
-async function deleteRecorder(id){
-  const r = state.recorders.find(x => x.recorderId === id);
-  if(!r) return;
-  if(!confirm(`記載者「${r.name}」を一覧から削除します。過去に記録済みのカルテの「記載者」表示には影響しません。削除しますか？`)) return;
-  state.busy = true; render();
-  const res = await apiPost("deleteRecorder", { recorderId: id });
-  state.busy = false;
-  if(!res.ok){ alert("削除に失敗しました：" + (res.error||"")); render(); return; }
-  state.recorders = state.recorders.filter(x => x.recorderId !== id);
-  if(state.selectedRecorderId === id){
-    state.selectedRecorderId = null;
-    try{ localStorage.removeItem("jump_karte_recorder_id"); }catch(e){}
+
+async function toggleNoticeCheck(id, checked){
+  const n = state.notices.find(x => x.noticeId === id); if(!n) return;
+  const res = await apiPost("ackNotice", { noticeId: id, checked });
+  if(!res.ok){ alert("チェックの保存に失敗しました：" + (res.error||"")); render(); return; }
+  n.mine.checked = !!checked; n.mine.checkedAt = res.checkedAt || "";
+  render();
+  if(checked){
+    // 実行をチェックしたら、この連絡事項を削除するか確認する
+    if(confirm("確認・実行済みにしました。\nこの連絡事項を削除しますか？\n（あなたの画面から消えます。送信した人には「確認済み」と残ります）")){
+      await dismissNotice(id, true);
+    }
   }
+}
+
+async function dismissNotice(id, alreadyAsked){
+  const n = state.notices.find(x => x.noticeId === id); if(!n) return;
+  if(!alreadyAsked && !confirm("この連絡事項を削除しますか？\n（あなたの画面から消えます。送信した人の確認状況の記録は残ります）")) return;
+  // 期限内の削除は、もう一度確認する
+  if(n.dueDate && todayISO() <= n.dueDate){
+    if(!confirm(`この連絡事項は期限内です（${fmtDate(n.dueDate)}まで）。\n本当に削除しますか？`)) return;
+  }
+  const res = await apiPost("ackNotice", { noticeId: id, dismissed: true });
+  if(!res.ok){ alert("削除に失敗しました：" + (res.error||"")); return; }
+  n.mine.dismissed = true;
+  render();
+}
+
+async function deleteOwnNotice(id){
+  const n = state.notices.find(x => x.noticeId === id); if(!n) return;
+  if(!confirm(`「${n.title || "（件名なし）"}」を削除します。\n受け取った人の画面からも消え、確認状況の記録も失われます。よろしいですか？`)) return;
+  const res = await apiPost("deleteNotice", { noticeId: id });
+  if(!res.ok){ alert("削除に失敗しました：" + (res.error||"")); return; }
+  state.notices = state.notices.filter(x => x.noticeId !== id);
   render();
 }
 
@@ -1637,7 +1767,8 @@ async function deleteRecorder(id){
   state.auth = loadAuth();
   render();
   if(state.auth){
-    await loadAll();
+    state.noticeOpen = true; state.noticeTab = "inbox";
+    await Promise.all([loadAll(), loadNotices()]);
     render();
   }
 })();

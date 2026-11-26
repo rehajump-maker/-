@@ -296,6 +296,20 @@ function loadAuth(){
 function saveAuth(auth){
   try{ sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(auth)); }catch(e){}
 }
+/* 最後にこのスタッフがカルテを操作した時刻を端末に記録する。
+   ログアウト（手動・強制・自動）後3時間以内の再ログインでは、連絡事項を自動表示しない */
+const NOTICE_SKIP_MS = 3 * 60 * 60 * 1000;
+function lastActiveKey(staffId){ return "jump_karte_last_active_" + staffId; }
+function markActive(auth){
+  try{ if(auth && auth.staffId) localStorage.setItem(lastActiveKey(auth.staffId), String(Date.now())); }catch(e){}
+}
+function shouldAutoOpenNotices(staffId){
+  try{
+    const last = Number(localStorage.getItem(lastActiveKey(staffId)));
+    if(!last) return true;
+    return (Date.now() - last) > NOTICE_SKIP_MS;
+  }catch(e){ return true; }
+}
 function clearAuth(){
   try{ sessionStorage.removeItem(AUTH_STORAGE_KEY); }catch(e){}
 }
@@ -338,6 +352,7 @@ async function apiGet(params){
   const res = await fetch(url);
   const data = await res.json();
   if(!data.ok && data.code === "AUTH") handleAuthFailure();
+  else if(data.ok) markActive(auth);
   return data;
 }
 async function apiPost(action, payload){
@@ -350,6 +365,7 @@ async function apiPost(action, payload){
     });
     const data = await res.json();
     if(!data.ok && data.code === "AUTH") handleAuthFailure();
+    else if(data.ok) markActive(auth);
     return data;
   }catch(e){
     console.error("API error:", action, e);
@@ -591,9 +607,11 @@ function bindLoginEvents(){
         state.loginBusy = false;
         if(data.ok){
           state.auth = { token: data.token, name: data.name, role: data.role, staffId: data.staffId };
+          const openNotices = shouldAutoOpenNotices(data.staffId); // 前回の操作から3時間以内なら開かない
           saveAuth(state.auth);
+          markActive(state.auth);
           state.loaded = false;
-          state.noticeOpen = true; state.noticeTab = "inbox"; state.noticeForm = null; state.notices = [];
+          state.noticeOpen = openNotices; state.noticeTab = "inbox"; state.noticeForm = null; state.notices = [];
           render();
           await Promise.all([loadAll(), loadNotices()]);
           render();
@@ -659,7 +677,7 @@ function renderTopbar(){
       <a class="tab-btn" href="${MEASURE_URL}" target="_blank" rel="noopener">体力測定を開く</a>
     </div>
     <div class="tabs" style="align-items:center;">
-      <button class="tab-btn" id="openNoticesBtn">📢 連絡事項${noticeUncheckedCount()>0?`（未確認${noticeUncheckedCount()}）`:""}</button>
+      <button class="tab-btn openNoticesBtn">📢 連絡事項${noticeUncheckedCount()>0?`（未確認${noticeUncheckedCount()}）`:""}</button>
       <span style="color:#CBDAD5; font-size:0.82rem;">${escapeHtml(state.auth.name)}さん</span>
       <button class="tab-btn" id="logoutBtn">ログアウト</button>
     </div>
@@ -775,6 +793,13 @@ function renderMain(){
   if(!state.loaded){
     return `<div class="empty">読み込み中...</div>`;
   }
+  return renderNoticeBar() + renderMainTab();
+}
+function renderNoticeBar(){
+  const n = noticeUncheckedCount();
+  return `<button class="openNoticesBtn" style="display:flex; width:100%; align-items:center; gap:10px; padding:12px 14px; margin-bottom:12px; border-radius:10px; cursor:pointer; text-align:left; font-size:0.95rem; font-weight:700; border:1px solid ${n>0?"#e0a800":"var(--line)"}; background:${n>0?"#fff1cf":"var(--surface-2)"}; color:${n>0?"#8a5a00":"var(--ink-soft)"};">📢 連絡事項${n>0?`　未確認 ${n}件`:""}<span style="margin-left:auto; font-weight:500; font-size:0.82rem;">タップして開く ›</span></button>`;
+}
+function renderMainTab(){
   if(state.tab === "patients") return renderPatientsTab();
   if(state.tab === "templates") return renderTemplatesTab();
   if(state.tab === "stores") return renderStoresTab();
@@ -1683,8 +1708,7 @@ function renderNoticeModal(){
 function bindNoticeEvents(){
   const $ = (sel) => document.querySelector(sel);
   const $$ = (sel) => Array.from(document.querySelectorAll(sel));
-  const ob = $("#openNoticesBtn");
-  if(ob) ob.onclick = async () => { state.noticeOpen = true; state.noticeTab = "inbox"; state.noticeForm = null; render(); await loadNotices(); render(); };
+  $$(".openNoticesBtn").forEach(ob => ob.onclick = async () => { state.noticeOpen = true; state.noticeTab = "inbox"; state.noticeForm = null; render(); await loadNotices(); render(); });
   const closeIt = () => { state.noticeOpen = false; state.noticeForm = null; render(); };
   const c1 = $("#closeNotices"); if(c1) c1.onclick = closeIt;
   const c2 = $("#closeNotices2"); if(c2) c2.onclick = closeIt;
@@ -1767,7 +1791,7 @@ async function deleteOwnNotice(id){
   state.auth = loadAuth();
   render();
   if(state.auth){
-    state.noticeOpen = true; state.noticeTab = "inbox";
+    state.noticeOpen = shouldAutoOpenNotices(state.auth.staffId); state.noticeTab = "inbox";
     await Promise.all([loadAll(), loadNotices()]);
     render();
   }
